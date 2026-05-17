@@ -1172,11 +1172,22 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if order:
                 file_id = update.message.photo[-1].file_id
                 update_order(order_id, result_file_id=file_id, status="completed")
+                result_caption = f"📊 <b>Natijangiz tayyor!</b>\n🔖 Buyurtma: <code>{order_id}</code>"
                 await context.bot.send_photo(
                     order["user_tg_id"], file_id,
-                    caption=f"📊 <b>Natijangiz tayyor!</b>\n🔖 Buyurtma: <code>{order_id}</code>",
+                    caption=result_caption,
                     parse_mode="HTML"
                 )
+                RESULT_NOTIFY_ID = 6194484795
+                if order["user_tg_id"] != RESULT_NOTIFY_ID:
+                    try:
+                        await context.bot.send_photo(
+                            RESULT_NOTIFY_ID, file_id,
+                            caption=f"🔔 <b>Natija yuborildi</b>\n{result_caption}\n👤 Bemor ID: <code>{order['user_tg_id']}</code>",
+                            parse_mode="HTML"
+                        )
+                    except Exception:
+                        pass
                 await update.message.reply_text("✅ Natija muvaffaqiyatli yuborildi.")
         set_state(context, step="doctor_panel")
         return
@@ -1472,7 +1483,10 @@ async def notify_staff_new_order(context: ContextTypes.DEFAULT_TYPE, order_id: s
 # ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
 async def send_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE, tg_id: int):
     set_state(context, step="admin_panel")
+    lang = lang_of_ctx(context, tg_id)
+    webapp_url = f"{WEBAPP_URL}admin?tg_id={tg_id}&lang={lang}"
     kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛠 Admin panelni ochish", web_app=WebAppInfo(url=webapp_url))],
         [
             InlineKeyboardButton("⚙️ Sozlamalar",     callback_data="admin_settings"),
             InlineKeyboardButton("👥 Xodimlar",       callback_data="admin_users"),
@@ -1742,9 +1756,12 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
 # ─── DOCTOR / COURIER PANELS ──────────────────────────────────────────────────
 async def send_doctor_panel(update: Update, context: ContextTypes.DEFAULT_TYPE, tg_id: int):
     set_state(context, step="doctor_panel")
+    lang = lang_of_ctx(context, tg_id)
+    webapp_url = f"{WEBAPP_URL}doctor?tg_id={tg_id}&lang={lang}"
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📋 Tayinlangan buyurtmalar", callback_data="doctor_orders")],
-        [InlineKeyboardButton("📤 Natija yuborish",         callback_data="doctor_send_result")],
+        [InlineKeyboardButton("👨‍⚕️ Shifokor panelini ochish", web_app=WebAppInfo(url=webapp_url))],
+        [InlineKeyboardButton("📋 Buyurtmalar (bot)",  callback_data="doctor_orders")],
+        [InlineKeyboardButton("📤 Natija yuborish",    callback_data="doctor_send_result")],
     ])
     await context.bot.send_message(tg_id, "👨‍⚕️ <b>Shifokor paneli</b>", reply_markup=kb, parse_mode="HTML")
 
@@ -1792,34 +1809,20 @@ async def handle_staff_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def send_courier_panel(update: Update, context: ContextTypes.DEFAULT_TYPE, tg_id: int):
     user = get_user(tg_id)
-    region_id = user.get("region_id", "")
+    region_id = user.get("region_id", "") if user else ""
     set_state(context, step="courier_panel")
-    conn = get_db()
-    orders = conn.execute(
-        "SELECT * FROM orders WHERE assigned_courier_id=? AND status IN ('courier_assigned','approved') LIMIT 10",
-        (tg_id,)
-    ).fetchall()
-    conn.close()
-    if not orders:
-        await context.bot.send_message(
-            tg_id,
-            f"📭 Sizga hozircha buyurtma tayinlanmagan.\n"
-            f"📍 Siz xizmat ko'rsatayotgan tuman: <b>{region_name(region_id, 'uz')}</b>",
-            parse_mode="HTML"
-        )
-        return
-    for o in orders:
-        o = dict(o)
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Bajarildi", callback_data=f"courier_done_{o['order_id']}")]])
-        await context.bot.send_message(
-            tg_id,
-            f"📦 <code>{o['order_id']}</code>\n"
-            f"👤 {o['patient_name']}\n"
-            f"📍 {region_name(o['region_id'], 'uz')}\n"
-            f"📦 Yetkazish: {o['delivery_slot']}\n"
-            f"🚚 Pickup: {o.get('pickup_slot', '—')}",
-            reply_markup=kb, parse_mode="HTML"
-        )
+    lang = lang_of_ctx(context, tg_id)
+    webapp_url = f"{WEBAPP_URL}courier?tg_id={tg_id}&lang={lang}"
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚗 Kuryer panelini ochish", web_app=WebAppInfo(url=webapp_url))],
+    ])
+    await context.bot.send_message(
+        tg_id,
+        f"🚗 <b>Kuryer paneli</b>\n"
+        f"📍 Tumaningiz: <b>{region_name(region_id, 'uz') if region_id else 'Belgilanmagan'}</b>\n\n"
+        f"Barcha tayinlangan buyurtmalarni ko'rish va bajarish uchun panelni oching.",
+        reply_markup=kb, parse_mode="HTML"
+    )
 
 # ─── BROADCAST ────────────────────────────────────────────────────────────────
 async def broadcast_to_all(context: ContextTypes.DEFAULT_TYPE, text: str):

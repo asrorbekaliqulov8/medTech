@@ -29,6 +29,8 @@ export const ordersTable = pgTable("orders", {
   status: text("status").notNull().default("pending_payment"),
   receiptFileId: text("receipt_file_id"),
   resultFileId: text("result_file_id"),
+  courierTgId: bigint("courier_tg_id", { mode: "number" }),
+  doctorTgId: bigint("doctor_tg_id", { mode: "number" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
