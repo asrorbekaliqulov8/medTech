@@ -55,7 +55,7 @@ ADMIN_IDS = [6194484795, 8161075408]
 
 # IMPORTANT: Set this to your deployed Web App URL
 # During development use your Replit URL, e.g.: https://your-app.replit.app/
-WEBAPP_URL = "https://your-medbot-webapp.replit.app/"
+WEBAPP_URL = "https://c0306508-3f48-4dda-a147-db0ad6613d4b-00-21x0znnsakdaf.sisko.replit.dev/"
 
 # ─── TASHKENT DISTRICTS ───────────────────────────────────────────────────────
 REGIONS = [
