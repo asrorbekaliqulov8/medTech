@@ -55,7 +55,7 @@ ADMIN_IDS = [6194484795, 8161075408]
 
 # IMPORTANT: Set this to your deployed Web App URL
 # During development use your Replit URL, e.g.: https://your-app.replit.app/
-WEBAPP_URL = "https://c0306508-3f48-4dda-a147-db0ad6613d4b-00-21x0znnsakdaf.sisko.replit.dev/"
+WEBAPP_URL = "https://lab-test-order--asroraliqulov.replit.app/"
 
 # ─── TASHKENT DISTRICTS ───────────────────────────────────────────────────────
 REGIONS = [
@@ -666,11 +666,12 @@ async def is_subscribed(bot, tg_id):
 
 # ─── KEYBOARD BUILDERS ────────────────────────────────────────────────────────
 def make_main_menu(lang) -> InlineKeyboardMarkup:
-    """Main menu — order button opens the WebApp."""
+    """Main menu — order button opens the WebApp with user's language."""
+    webapp_url = f"{WEBAPP_URL}?lang={lang}"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(
             t("webapp_order_btn", lang),
-            web_app=WebAppInfo(url=WEBAPP_URL)
+            web_app=WebAppInfo(url=webapp_url)
         )],
         [
             InlineKeyboardButton(t("btn_results", lang),      callback_data="menu_results"),

@@ -1,11 +1,11 @@
-import { pgTable, text, serial, integer, real, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, bigint, real, boolean, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
 export const ordersTable = pgTable("orders", {
   id: serial("id").primaryKey(),
   orderId: text("order_id").notNull().unique(),
-  telegramUserId: integer("telegram_user_id").notNull(),
+  telegramUserId: bigint("telegram_user_id", { mode: "number" }).notNull(),
   telegramUsername: text("telegram_username"),
   lang: text("lang").notNull().default("uz"),
   patientName: text("patient_name").notNull(),

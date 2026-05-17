@@ -15,16 +15,16 @@ import { useTranslation } from '../../hooks/useTranslation';
 const variants = {
   enter: (direction: number) => ({
     x: direction > 0 ? '100%' : '-100%',
-    opacity: 0
+    opacity: 0,
   }),
   center: {
     x: 0,
-    opacity: 1
+    opacity: 1,
   },
   exit: (direction: number) => ({
     x: direction < 0 ? '100%' : '-100%',
-    opacity: 0
-  })
+    opacity: 0,
+  }),
 };
 
 export function Wizard() {
@@ -34,7 +34,6 @@ export function Wizard() {
   const [direction, setDirection] = useState(1);
   const [isSuccess, setIsSuccess] = useState(false);
 
-  // Auto-expand Telegram WebApp
   useEffect(() => {
     try {
       // @ts-ignore
@@ -44,19 +43,19 @@ export function Wizard() {
         // @ts-ignore
         window.Telegram.WebApp.expand();
       }
-    } catch(e) {}
+    } catch (_) {}
   }, []);
 
   const totalSteps = patientType === 'child' ? 7 : 6;
-  const currentProgress = ((step - 1) / totalSteps) * 100;
+  const displayStep = step > 4 && patientType === 'adult' ? step - 1 : step;
+  const currentProgress = step < 8 ? ((displayStep - 1) / totalSteps) * 100 : 100;
 
   const nextStep = () => {
     setDirection(1);
-    // Skip step 4 if adult
     if (step === 3 && patientType === 'adult') {
       setStep(5);
     } else {
-      setStep(step + 1);
+      setStep(s => s + 1);
     }
   };
 
@@ -65,7 +64,7 @@ export function Wizard() {
     if (step === 5 && patientType === 'adult') {
       setStep(3);
     } else {
-      setStep(step - 1);
+      setStep(s => s - 1);
     }
   };
 
@@ -75,21 +74,21 @@ export function Wizard() {
       try {
         // @ts-ignore
         window.Telegram?.WebApp?.close();
-      } catch(e) {}
+      } catch (_) {}
     }, 3000);
   };
 
   if (isSuccess) {
     return (
       <div className="h-[100dvh] flex flex-col items-center justify-center p-6 bg-primary/5">
-        <motion.div 
+        <motion.div
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
           className="w-24 h-24 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-5xl mb-6 shadow-xl"
         >
           ✓
         </motion.div>
-        <motion.h2 
+        <motion.h2
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
@@ -102,24 +101,27 @@ export function Wizard() {
   }
 
   return (
-    <div className="h-[100dvh] flex flex-col bg-background max-w-md mx-auto relative overflow-hidden">
+    <div className="h-[100dvh] flex flex-col bg-background max-w-md mx-auto">
       {/* Header */}
-      <div className="shrink-0 p-4 pb-2 bg-background z-10">
-        <div className="flex items-center mb-4">
+      <div className="shrink-0 px-4 pt-4 pb-2 bg-background z-10">
+        <div className="flex items-center mb-3">
           {step > 1 && step < 8 && (
-            <button onClick={prevStep} className="p-2 -ml-2 rounded-full hover:bg-muted text-muted-foreground">
+            <button
+              onClick={prevStep}
+              className="p-2 -ml-2 rounded-full active:bg-muted text-muted-foreground"
+            >
               ← Orqaga
             </button>
           )}
-          <div className="flex-1 text-center font-medium opacity-50">
-            {step < 8 && `Qadam ${step > 4 && patientType === 'adult' ? step - 1 : step} / ${totalSteps}`}
+          <div className="flex-1 text-center text-sm font-medium text-muted-foreground">
+            {step < 8 && `Qadam ${displayStep} / ${totalSteps}`}
           </div>
         </div>
-        {step < 8 && <Progress value={currentProgress} className="h-2" />}
+        {step < 8 && <Progress value={currentProgress} className="h-1.5" />}
       </div>
 
-      {/* Content area */}
-      <div className="flex-1 relative overflow-x-hidden overflow-y-auto px-4 py-2">
+      {/* Animated content — overflow-hidden clips the sliding panels */}
+      <div className="flex-1 relative overflow-hidden">
         <AnimatePresence initial={false} custom={direction} mode="wait">
           <motion.div
             key={step}
@@ -128,8 +130,8 @@ export function Wizard() {
             initial="enter"
             animate="center"
             exit="exit"
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="w-full absolute"
+            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            className="absolute inset-0 overflow-y-auto px-4 py-3"
           >
             {step === 1 && <Step1Service onNext={nextStep} />}
             {step === 2 && <Step2PatientType onNext={nextStep} />}

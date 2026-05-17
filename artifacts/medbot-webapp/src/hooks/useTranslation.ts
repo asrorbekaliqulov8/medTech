@@ -125,19 +125,34 @@ const translations = {
   }
 };
 
+function detectLanguage(): Language {
+  // 1. URL query param: ?lang=uz  (passed by the bot)
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const paramLang = params.get('lang');
+    if (paramLang === 'uz' || paramLang === 'ru' || paramLang === 'en') {
+      return paramLang;
+    }
+  } catch (_) {}
+
+  // 2. Telegram WebApp initDataUnsafe.user.language_code
+  try {
+    // @ts-ignore
+    const tgLang = window.Telegram?.WebApp?.initDataUnsafe?.user?.language_code;
+    if (tgLang === 'ru') return 'ru';
+    if (tgLang === 'en') return 'en';
+    if (tgLang === 'uz') return 'uz';
+  } catch (_) {}
+
+  // 3. Default
+  return 'uz';
+}
+
 export function useTranslation() {
-  const [lang, setLang] = useState<Language>('uz');
+  const [lang, setLang] = useState<Language>(detectLanguage);
 
   useEffect(() => {
-    try {
-      // @ts-ignore
-      const tgLang = window.Telegram?.WebApp?.initDataUnsafe?.user?.language_code;
-      if (tgLang === 'ru' || tgLang === 'en' || tgLang === 'uz') {
-        setLang(tgLang);
-      }
-    } catch (e) {
-      // Ignore
-    }
+    setLang(detectLanguage());
   }, []);
 
   const t = (key: keyof typeof translations.uz) => {
