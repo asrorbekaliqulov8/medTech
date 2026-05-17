@@ -49,13 +49,17 @@ from telegram.ext import (
 from telegram.constants import ParseMode
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
-BOT_TOKEN = "7723160549:AAHm95Og2REAyYG0UjQKzaB8qvYj8rCDLnE"
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+if not BOT_TOKEN:
+    raise RuntimeError("TELEGRAM_BOT_TOKEN environment variable is not set.")
+
 CHANNEL_ID = "-1003969388677"
 ADMIN_IDS = [6194484795, 8161075408]
 
-# IMPORTANT: Set this to your deployed Web App URL
-# During development use your Replit URL, e.g.: https://your-app.replit.app/
-WEBAPP_URL = "https://lab-test-order--asroraliqulov.replit.app/"
+# Automatically derive the Web App URL from the Replit domain env var,
+# falling back to the WEBAPP_URL env var, then a hardcoded default.
+_replit_domain = os.environ.get("REPLIT_DEV_DOMAIN") or os.environ.get("REPLIT_DOMAINS", "").split(",")[0].strip()
+WEBAPP_URL = os.environ.get("WEBAPP_URL") or (f"https://{_replit_domain}/" if _replit_domain else "https://lab-test-order--asroraliqulov.replit.app/")
 
 # ─── TASHKENT DISTRICTS ───────────────────────────────────────────────────────
 REGIONS = [
