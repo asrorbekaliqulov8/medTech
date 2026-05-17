@@ -3,13 +3,21 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: MedBot Web App API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: districts
+    description: District operations
+  - name: services
+    description: Service operations
+  - name: orders
+    description: Order operations
+  - name: settings
+    description: Settings operations
 paths:
   /healthz:
     get:
@@ -24,6 +32,104 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /districts:
+    get:
+      operationId: listDistricts
+      tags: [districts]
+      summary: List all allowed districts
+      description: Returns all Tashkent districts with coordinates and availability
+      responses:
+        "200":
+          description: List of districts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/District"
+
+  /services:
+    get:
+      operationId: listServices
+      tags: [services]
+      summary: List all available services
+      description: Returns all medical analysis services with prices
+      responses:
+        "200":
+          description: List of services
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Service"
+
+  /settings/public:
+    get:
+      operationId: getPublicSettings
+      tags: [settings]
+      summary: Get public settings
+      description: Returns public configuration like prices, card info, etc.
+      responses:
+        "200":
+          description: Public settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicSettings"
+
+  /orders:
+    post:
+      operationId: createOrder
+      tags: [orders]
+      summary: Create a new order
+      description: Submit a new medical analysis order from the Telegram Web App
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderInput"
+      responses:
+        "201":
+          description: Order created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      tags: [orders]
+      summary: Get order by ID
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Order details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "404":
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +140,169 @@ components:
       required:
         - status
 
+    District:
+      type: object
+      required: [id, nameUz, nameRu, nameEn, lat, lng, available]
+      properties:
+        id:
+          type: string
+        nameUz:
+          type: string
+        nameRu:
+          type: string
+        nameEn:
+          type: string
+        lat:
+          type: number
+        lng:
+          type: number
+        available:
+          type: boolean
+        osmRelationId:
+          type: ["string", "null"]
+
+    Service:
+      type: object
+      required: [id, nameUz, nameRu, nameEn, price, extraPickupPrice]
+      properties:
+        id:
+          type: string
+        nameUz:
+          type: string
+        nameRu:
+          type: string
+        nameEn:
+          type: string
+        price:
+          type: integer
+        extraPickupPrice:
+          type: integer
+        description:
+          type: ["string", "null"]
+
+    PublicSettings:
+      type: object
+      required: [servicePrice, pickupExtra, paymentCard, paymentOwner, clickPaymentUrl]
+      properties:
+        servicePrice:
+          type: integer
+        pickupExtra:
+          type: integer
+        paymentCard:
+          type: string
+        paymentOwner:
+          type: string
+        clickPaymentUrl:
+          type: string
+        adminContact:
+          type: string
+
+    OrderInput:
+      type: object
+      required:
+        - telegramUserId
+        - lang
+        - patientType
+        - patientName
+        - patientAge
+        - patientGender
+        - serviceId
+        - complaints
+        - deliverySlot
+        - districtId
+        - latitude
+        - longitude
+      properties:
+        telegramUserId:
+          type: integer
+        telegramUsername:
+          type: ["string", "null"]
+        lang:
+          type: string
+          enum: [uz, ru, en]
+        patientType:
+          type: string
+          enum: [adult, child]
+        patientName:
+          type: string
+        patientAge:
+          type: integer
+        patientGender:
+          type: string
+          enum: [male, female]
+        serviceId:
+          type: string
+        childTiming:
+          type: ["string", "null"]
+        usesDiaper:
+          type: ["boolean", "null"]
+        complaints:
+          type: array
+          items:
+            type: string
+        customComplaint:
+          type: ["string", "null"]
+        deliverySlot:
+          type: string
+        pickupSlot:
+          type: ["string", "null"]
+        districtId:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        addressNote:
+          type: ["string", "null"]
+
+    Order:
+      type: object
+      required: [id, orderId, status, createdAt]
+      properties:
+        id:
+          type: integer
+        orderId:
+          type: string
+        telegramUserId:
+          type: integer
+        patientName:
+          type: string
+        patientAge:
+          type: integer
+        patientGender:
+          type: string
+        patientType:
+          type: string
+        serviceId:
+          type: string
+        complaints:
+          type: array
+          items:
+            type: string
+        deliverySlot:
+          type: string
+        pickupSlot:
+          type: ["string", "null"]
+        districtId:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        price:
+          type: integer
+        extraPrice:
+          type: integer
+        isFree:
+          type: boolean
+        status:
+          type: string
+        createdAt:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
