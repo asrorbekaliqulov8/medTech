@@ -671,7 +671,7 @@ async def is_subscribed(bot, tg_id):
 # ─── KEYBOARD BUILDERS ────────────────────────────────────────────────────────
 def make_main_menu(lang) -> InlineKeyboardMarkup:
     """Main menu — order button opens the WebApp with user's language."""
-    webapp_url = f"{WEBAPP_URL}?lang={lang}"
+    webapp_url = f"{WEBAPP_URL}app?lang={lang}"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(
             t("webapp_order_btn", lang),

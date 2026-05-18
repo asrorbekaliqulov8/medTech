@@ -17,7 +17,7 @@ router.get("/doctor/orders", requireRole("doctor", "admin"), async (_req, res) =
 });
 
 router.post("/doctor/orders/:orderId/result", requireRole("doctor", "admin"), async (req, res) => {
-  const { orderId } = req.params;
+  const orderId = String(req.params.orderId);
   const { file_base64, filename } = req.body as { file_base64: string; filename: string; caption?: string };
 
   if (!file_base64 || !filename) {

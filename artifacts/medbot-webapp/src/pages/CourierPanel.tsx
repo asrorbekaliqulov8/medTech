@@ -5,36 +5,39 @@ import { useStaffAuth } from '@/hooks/useStaffAuth';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CheckCircle2, MapPin, Clock, RefreshCw, Package2, Truck } from 'lucide-react';
+import { CheckCircle2, MapPin, Clock, RefreshCw, Package2, Truck, Navigation, Phone } from 'lucide-react';
 
 type Lang = 'uz' | 'ru' | 'en';
 const T = {
   uz: {
     title: "Kuryer Paneli", loading: "Yuklanmoqda...", noOrders: "Hozircha buyurtma yo'q",
-    markDone: "✅ Bajarildi", doing: "Yuborilmoqda...", success: "Bajarildi!",
+    markDone: "✅ Namuna olindi", doing: "Yuborilmoqda...", success: "Bajarildi!",
     patient: "Bemor", delivery: "Yetkazish", pickup: "Pickup", district: "Tuman",
     accessDenied: "Ruxsat yo'q", age: "yosh", yourRegion: "Sizning tumaningiz",
     allRegions: "Barcha tumanlar", ordersCount: "ta buyurtma",
     noRegion: "Tuman belgilanmagan", done: "Namuna olindi ✓",
-    addressNote: "Manzil izohi",
+    addressNote: "Manzil izohi", navigate: "Navigatsiya", call: "Qo'ng'iroq",
+    completed: "Bajarilgan", active: "Faol buyurtmalar",
   },
   ru: {
     title: "Панель курьера", loading: "Загрузка...", noOrders: "Нет заказов",
-    markDone: "✅ Выполнено", doing: "Отправка...", success: "Выполнено!",
+    markDone: "✅ Образец получен", doing: "Отправка...", success: "Выполнено!",
     patient: "Пациент", delivery: "Доставка", pickup: "Забор", district: "Район",
     accessDenied: "Нет доступа", age: "лет", yourRegion: "Ваш район",
     allRegions: "Все районы", ordersCount: "заказов",
     noRegion: "Район не назначен", done: "Образец получен ✓",
-    addressNote: "Примечание к адресу",
+    addressNote: "Примечание к адресу", navigate: "Навигация", call: "Звонок",
+    completed: "Выполнено", active: "Активные заказы",
   },
   en: {
     title: "Courier Panel", loading: "Loading...", noOrders: "No orders",
-    markDone: "✅ Done", doing: "Sending...", success: "Done!",
+    markDone: "✅ Sample collected", doing: "Sending...", success: "Done!",
     patient: "Patient", delivery: "Delivery", pickup: "Pickup", district: "District",
     accessDenied: "Access denied", age: "y.o.", yourRegion: "Your region",
     allRegions: "All regions", ordersCount: "orders",
     noRegion: "No region assigned", done: "Sample collected ✓",
-    addressNote: "Address note",
+    addressNote: "Address note", navigate: "Navigate", call: "Call",
+    completed: "Completed", active: "Active orders",
   },
 };
 
@@ -49,6 +52,20 @@ async function api(path: string, opts: RequestInit = {}) {
   const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `HTTP ${r.status}`); }
   return r.json();
+}
+
+function openNavigation(lat: number, lng: number) {
+  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const isTelegram = !!(window as any).Telegram?.WebApp;
+  if (isTelegram || isIOS) {
+    window.open(`https://maps.apple.com/?daddr=${lat},${lng}&dirflg=d`, '_blank');
+  } else {
+    window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`, '_blank');
+  }
+}
+
+function openYandex(lat: number, lng: number) {
+  window.open(`https://yandex.uz/maps/?rtext=~${lat},${lng}&rtt=auto`, '_blank');
 }
 
 export default function CourierPanel() {
@@ -69,6 +86,7 @@ function CourierPanelInner() {
   const [acting, setActing] = useState<string | null>(null);
   const [doneSet, setDoneSet] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!tgId) { setAuthorized(false); return; }
@@ -117,7 +135,6 @@ function CourierPanelInner() {
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
           </button>
         </div>
-        {/* Region badge */}
         <div className="flex items-center gap-2 bg-white/20 rounded-xl px-3 py-2">
           <MapPin size={14} />
           <span className="text-sm font-medium">
@@ -148,42 +165,87 @@ function CourierPanelInner() {
           </div>
         ) : (
           <>
+            {activeOrders.length > 0 && (
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide px-1">{t.active}</p>
+            )}
             {activeOrders.map(order => (
               <motion.div key={order.orderId} layout initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
-                <Card className="p-4 border-0 shadow-sm space-y-3 rounded-2xl overflow-hidden relative">
-                  {/* Side accent */}
-                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-400 rounded-l-2xl" />
-                  <div className="pl-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-sm font-bold text-amber-700">{order.orderId}</span>
-                      <Package2 size={16} className="text-slate-400" />
-                    </div>
-                    <div className="text-sm font-semibold mt-1">{order.patientName}
-                      <span className="font-normal text-slate-500 ml-1.5">{order.patientAge} {t.age}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 mt-1.5 text-xs text-slate-500">
-                      <MapPin size={12} className="text-amber-500" />
-                      <span className="font-medium text-slate-700">{REGIONS[order.districtId] ?? order.districtId}</span>
-                    </div>
-                    {order.addressNote && (
-                      <div className="text-xs text-slate-500 mt-1 bg-slate-50 rounded-lg px-2 py-1.5">
-                        📝 {order.addressNote}
+                <Card className="border-0 shadow-sm rounded-2xl overflow-hidden">
+                  {/* Card header — always visible */}
+                  <div className="p-4 relative" onClick={() => setExpandedId(expandedId === order.orderId ? null : order.orderId)}>
+                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-400 rounded-l-2xl" />
+                    <div className="pl-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-sm font-bold text-amber-700">{order.orderId}</span>
+                        <Package2 size={16} className="text-slate-400" />
                       </div>
-                    )}
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {order.deliverySlot && (
-                        <div className="flex items-center gap-1 text-xs text-slate-500 bg-blue-50 text-blue-700 rounded-full px-2.5 py-1">
-                          <Clock size={11} /> {t.delivery}: {order.deliverySlot}
-                        </div>
-                      )}
-                      {order.pickupSlot && (
-                        <div className="flex items-center gap-1 text-xs bg-purple-50 text-purple-700 rounded-full px-2.5 py-1">
-                          <Clock size={11} /> {t.pickup}: {order.pickupSlot}
-                        </div>
-                      )}
+                      <div className="text-sm font-semibold mt-1">{order.patientName}
+                        <span className="font-normal text-slate-500 ml-1.5">{order.patientAge} {t.age}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-1.5 text-xs text-slate-500">
+                        <MapPin size={12} className="text-amber-500" />
+                        <span className="font-medium text-slate-700">{REGIONS[order.districtId] ?? order.districtId}</span>
+                      </div>
                     </div>
-                    <Button className="w-full h-11 mt-3 bg-amber-500 hover:bg-amber-600 rounded-xl text-base font-semibold"
-                      onClick={() => markDone(order.orderId)} disabled={acting === order.orderId}>
+                  </div>
+
+                  {/* Expanded details */}
+                  <AnimatePresence>
+                    {expandedId === order.orderId && (
+                      <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden border-t border-slate-100">
+                        <div className="p-4 pl-6 space-y-3">
+                          {/* Address note */}
+                          {order.addressNote && (
+                            <div className="text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+                              📝 {order.addressNote}
+                            </div>
+                          )}
+
+                          {/* Slots */}
+                          <div className="flex flex-wrap gap-2">
+                            {order.deliverySlot && (
+                              <div className="flex items-center gap-1 text-xs bg-blue-50 text-blue-700 rounded-full px-2.5 py-1">
+                                <Clock size={11} /> {t.delivery}: {order.deliverySlot}
+                              </div>
+                            )}
+                            {order.pickupSlot && (
+                              <div className="flex items-center gap-1 text-xs bg-purple-50 text-purple-700 rounded-full px-2.5 py-1">
+                                <Clock size={11} /> {t.pickup}: {order.pickupSlot}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Navigation buttons */}
+                          {order.latitude && order.longitude && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <button onClick={() => openNavigation(order.latitude, order.longitude)}
+                                className="flex items-center justify-center gap-1.5 h-10 rounded-xl bg-blue-50 text-blue-700 text-xs font-semibold hover:bg-blue-100 transition-colors">
+                                <Navigation size={14} /> Google Maps
+                              </button>
+                              <button onClick={() => openYandex(order.latitude, order.longitude)}
+                                className="flex items-center justify-center gap-1.5 h-10 rounded-xl bg-orange-50 text-orange-700 text-xs font-semibold hover:bg-orange-100 transition-colors">
+                                🗺 Yandex Maps
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Coordinates */}
+                          {order.latitude && order.longitude && (
+                            <div className="text-[11px] text-slate-400 text-center">
+                              📍 {Number(order.latitude).toFixed(5)}, {Number(order.longitude).toFixed(5)}
+                            </div>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Action button */}
+                  <div className="px-4 pb-4 pl-6">
+                    <Button className="w-full h-11 bg-amber-500 hover:bg-amber-600 rounded-xl text-sm font-semibold"
+                      onClick={e => { e.stopPropagation(); markDone(order.orderId); }}
+                      disabled={acting === order.orderId}>
                       {acting === order.orderId
                         ? <><RefreshCw size={15} className="animate-spin mr-1.5" />{t.doing}</>
                         : t.markDone}
@@ -194,8 +256,8 @@ function CourierPanelInner() {
             ))}
 
             {completedOrders.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide px-1">Yakunlangan</p>
+              <div className="space-y-2 mt-2">
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide px-1">{t.completed}</p>
                 {completedOrders.map(order => (
                   <Card key={order.orderId} className="p-3.5 border-0 shadow-sm opacity-60 flex items-center gap-3">
                     <CheckCircle2 size={20} className="text-green-500 shrink-0" />

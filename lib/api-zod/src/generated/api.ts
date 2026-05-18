@@ -29,6 +29,8 @@ export const ListDistrictsResponseItem = zod.object({
   "lat": zod.number(),
   "lng": zod.number(),
   "available": zod.boolean(),
+  "courierExtraFee": zod.number().optional(),
+  "geojson": zod.unknown().nullish(),
   "osmRelationId": zod.string().nullish()
 })
 export const ListDistrictsResponse = zod.array(ListDistrictsResponseItem)

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TelegramGuard } from '@/components/TelegramGuard';
 import { useStaffAuth } from '@/hooks/useStaffAuth';
@@ -11,14 +11,26 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   BarChart3, Users, Package, Settings, Megaphone,
   CheckCircle2, XCircle, Clock, Trash2, Plus, RefreshCw,
-  TrendingUp, DollarSign, ShoppingBag, CalendarDays, UserPlus,
+  TrendingUp, DollarSign, ShoppingBag, CalendarDays, UserPlus, MapPin,
 } from 'lucide-react';
+
+// Leaflet
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+import { MapContainer, TileLayer, Marker, Polygon, Tooltip } from 'react-leaflet';
+
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
 
 type Lang = 'uz' | 'ru' | 'en';
 const T = {
   uz: {
     title: 'Admin Panel', stats: 'Statistika', orders: 'Buyurtmalar',
-    staff: 'Xodimlar', settings: 'Sozlamalar', broadcast: 'Xabar',
+    staff: 'Xodimlar', settings: 'Sozlamalar', broadcast: 'Xabar', districts: 'Tumanlar',
     totalOrders: 'Jami buyurtma', revenue: 'Daromad', pending: 'Kutilmoqda',
     completed: 'Bajarilgan', today: 'Bugun', users: 'Foydalanuvchilar',
     approve: 'Tasdiqlash', reject: 'Rad etish', approved: 'Tasdiqlangan',
@@ -37,10 +49,14 @@ const T = {
     allowedDistricts: 'Faol tumanlar (ID, vergul bilan)',
     staffList: 'Xodimlar ro\'yxati', addNew: 'Yangi qo\'shish',
     courier_done: 'Kuryer oldi', sample_collected: 'Namuna olindi',
+    activateDistrict: 'Faollashtirish', deactivateDistrict: 'O\'chirish',
+    extraFee: 'Qo\'shimcha to\'lov', loadPolygons: 'Chegaralarni yuklash',
+    districtActive: 'Faol', districtInactive: 'Nofaol',
+    loadingPolygons: 'Chegaralar yuklanmoqda...',
   },
   ru: {
     title: 'Админ Панель', stats: 'Статистика', orders: 'Заказы',
-    staff: 'Персонал', settings: 'Настройки', broadcast: 'Рассылка',
+    staff: 'Персонал', settings: 'Настройки', broadcast: 'Рассылка', districts: 'Районы',
     totalOrders: 'Всего заказов', revenue: 'Доход', pending: 'В ожидании',
     completed: 'Выполнено', today: 'Сегодня', users: 'Пользователи',
     approve: 'Подтвердить', reject: 'Отклонить', approved: 'Подтверждён',
@@ -59,10 +75,14 @@ const T = {
     allowedDistricts: 'Активные районы (ID через запятую)',
     staffList: 'Список персонала', addNew: 'Добавить нового',
     courier_done: 'Курьер забрал', sample_collected: 'Образец получен',
+    activateDistrict: 'Активировать', deactivateDistrict: 'Деактивировать',
+    extraFee: 'Доп. плата', loadPolygons: 'Загрузить границы',
+    districtActive: 'Активен', districtInactive: 'Неактивен',
+    loadingPolygons: 'Загрузка границ...',
   },
   en: {
     title: 'Admin Panel', stats: 'Statistics', orders: 'Orders',
-    staff: 'Staff', settings: 'Settings', broadcast: 'Broadcast',
+    staff: 'Staff', settings: 'Settings', broadcast: 'Broadcast', districts: 'Districts',
     totalOrders: 'Total orders', revenue: 'Revenue', pending: 'Pending',
     completed: 'Completed', today: 'Today', users: 'Users',
     approve: 'Approve', reject: 'Reject', approved: 'Approved',
@@ -81,6 +101,10 @@ const T = {
     allowedDistricts: 'Active districts (IDs, comma-separated)',
     staffList: 'Staff list', addNew: 'Add new',
     courier_done: 'Courier collected', sample_collected: 'Sample collected',
+    activateDistrict: 'Activate', deactivateDistrict: 'Deactivate',
+    extraFee: 'Extra fee', loadPolygons: 'Load boundaries',
+    districtActive: 'Active', districtInactive: 'Inactive',
+    loadingPolygons: 'Loading boundaries...',
   },
 };
 
@@ -104,7 +128,7 @@ const REGIONS = [
   { id: '14', name: "O'rtachirchiq" },
 ];
 
-type Tab = 'orders' | 'staff' | 'settings' | 'broadcast';
+type Tab = 'orders' | 'districts' | 'staff' | 'settings' | 'broadcast';
 
 async function api(path: string, opts: RequestInit = {}) {
   const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
@@ -151,10 +175,15 @@ function AdminPanelInner() {
 
       {/* Tab bar */}
       <div className="shrink-0 bg-white border-b flex overflow-x-auto">
-        {([['orders', <Package size={16} />, t.orders], ['staff', <Users size={16} />, t.staff],
-          ['settings', <Settings size={16} />, t.settings], ['broadcast', <Megaphone size={16} />, t.broadcast]] as const).map(([key, icon, label]) => (
+        {([
+          ['orders', <Package size={14} />, t.orders],
+          ['districts', <MapPin size={14} />, t.districts],
+          ['staff', <Users size={14} />, t.staff],
+          ['settings', <Settings size={14} />, t.settings],
+          ['broadcast', <Megaphone size={14} />, t.broadcast],
+        ] as const).map(([key, icon, label]) => (
           <button key={key} onClick={() => setTab(key as Tab)}
-            className={`flex-1 min-w-[70px] flex flex-col items-center gap-0.5 py-2.5 px-1 text-[11px] font-medium transition-colors border-b-2 ${tab === key ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500'}`}>
+            className={`flex-1 min-w-[60px] flex flex-col items-center gap-0.5 py-2.5 px-1 text-[10px] font-medium transition-colors border-b-2 ${tab === key ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500'}`}>
             {icon}{label}
           </button>
         ))}
@@ -165,6 +194,7 @@ function AdminPanelInner() {
         <AnimatePresence mode="wait">
           <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.15 }}>
             {tab === 'orders' && <OrdersTab tgId={tgId} lang={lang} t={t} />}
+            {tab === 'districts' && <DistrictsTab tgId={tgId} lang={lang} t={t} />}
             {tab === 'staff' && <StaffTab tgId={tgId} lang={lang} t={t} />}
             {tab === 'settings' && <SettingsTab tgId={tgId} t={t} />}
             {tab === 'broadcast' && <BroadcastTab tgId={tgId} t={t} />}
@@ -212,7 +242,6 @@ function OrdersTab({ tgId, lang, t }: { tgId: number; lang: Lang; t: typeof T.uz
 
   return (
     <div className="p-4 space-y-4">
-      {/* Stats cards */}
       {stats && (
         <div className="grid grid-cols-2 gap-3">
           <StatCard icon={<ShoppingBag size={18} />} label={t.totalOrders} value={stats.totalOrders} color="bg-blue-500" />
@@ -222,7 +251,6 @@ function OrdersTab({ tgId, lang, t }: { tgId: number; lang: Lang; t: typeof T.uz
         </div>
       )}
 
-      {/* Filter chips */}
       <div className="flex gap-2 overflow-x-auto pb-1">
         {filters.map(f => (
           <button key={f.key} onClick={() => setStatusFilter(f.key)}
@@ -235,7 +263,6 @@ function OrdersTab({ tgId, lang, t }: { tgId: number; lang: Lang; t: typeof T.uz
         </button>
       </div>
 
-      {/* Orders list */}
       {loading ? (
         Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)
       ) : orders.length === 0 ? (
@@ -259,17 +286,14 @@ function OrdersTab({ tgId, lang, t }: { tgId: number; lang: Lang; t: typeof T.uz
                 <span className="font-medium text-slate-700">{(order.price + order.extraPrice).toLocaleString()} {t.currency}</span>
               </div>
               <div className="text-xs text-slate-400">{new Date(order.createdAt).toLocaleString('uz-UZ')}</div>
-
               {order.status === 'pending_admin' && (
                 <div className="grid grid-cols-2 gap-2 pt-1">
                   <Button size="sm" className="bg-green-500 hover:bg-green-600 h-9 rounded-lg"
-                    onClick={() => act(order.orderId, 'approved')}
-                    disabled={acting === order.orderId}>
+                    onClick={() => act(order.orderId, 'approved')} disabled={acting === order.orderId}>
                     <CheckCircle2 size={14} className="mr-1" /> {t.approve}
                   </Button>
                   <Button size="sm" variant="outline" className="border-red-300 text-red-500 h-9 rounded-lg"
-                    onClick={() => act(order.orderId, 'rejected')}
-                    disabled={acting === order.orderId}>
+                    onClick={() => act(order.orderId, 'rejected')} disabled={acting === order.orderId}>
                     <XCircle size={14} className="mr-1" /> {t.reject}
                   </Button>
                 </div>
@@ -278,6 +302,230 @@ function OrdersTab({ tgId, lang, t }: { tgId: number; lang: Lang; t: typeof T.uz
           </motion.div>
         ))
       )}
+    </div>
+  );
+}
+
+// ─── Districts Tab ─────────────────────────────────────────────────────────────
+function DistrictsTab({ tgId, lang, t }: { tgId: number; lang: Lang; t: typeof T.uz }) {
+  const [districts, setDistricts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<any | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
+  const [extraFee, setExtraFee] = useState('');
+  const [loadingPolygons, setLoadingPolygons] = useState(false);
+  const [polyProgress, setPolyProgress] = useState(0);
+  const [view, setView] = useState<'map' | 'list'>('list');
+  const polyFetchRef = useRef(false);
+
+  const load = async () => {
+    setLoading(true);
+    try { setDistricts(await api('/api/districts')); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const toggle = async (id: string, current: boolean) => {
+    setToggling(id);
+    try {
+      const updated = await api(`/api/admin/districts/${id}?tg_id=${tgId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ available: !current }),
+      });
+      setDistricts(ds => ds.map(d => d.id === id ? { ...d, available: updated.available } : d));
+      if (selected?.id === id) setSelected((s: any) => ({ ...s, available: updated.available }));
+    } finally { setToggling(null); }
+  };
+
+  const saveExtraFee = async (id: string) => {
+    const fee = Number(extraFee);
+    if (isNaN(fee)) return;
+    await api(`/api/admin/districts/${id}?tg_id=${tgId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ courierExtraFee: fee }),
+    });
+    setDistricts(ds => ds.map(d => d.id === id ? { ...d, courierExtraFee: fee } : d));
+    if (selected?.id === id) setSelected((s: any) => ({ ...s, courierExtraFee: fee }));
+  };
+
+  const fetchAllPolygons = async () => {
+    if (polyFetchRef.current) return;
+    polyFetchRef.current = true;
+    setLoadingPolygons(true);
+    setPolyProgress(0);
+    const missing = districts.filter(d => !d.geojson);
+    for (let i = 0; i < missing.length; i++) {
+      const d = missing[i];
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(d.nameEn + ', Tashkent Region, Uzbekistan')}&format=json&polygon_geojson=1&limit=1`,
+          { headers: { 'Accept-Language': 'en' } }
+        );
+        const data = await res.json();
+        if (data.length > 0 && data[0].geojson && ['Polygon', 'MultiPolygon'].includes(data[0].geojson.type)) {
+          await api(`/api/admin/districts/${d.id}?tg_id=${tgId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ geojson: data[0].geojson }),
+          });
+          setDistricts(ds => ds.map(x => x.id === d.id ? { ...x, geojson: data[0].geojson } : x));
+        }
+      } catch {}
+      setPolyProgress(Math.round(((i + 1) / missing.length) * 100));
+      await new Promise(r => setTimeout(r, 1200));
+    }
+    setLoadingPolygons(false);
+    polyFetchRef.current = false;
+  };
+
+  const geojsonToLeaflet = (geojson: any): [number, number][][] => {
+    if (!geojson) return [];
+    if (geojson.type === 'Polygon') {
+      return [geojson.coordinates[0].map((c: number[]) => [c[1], c[0]] as [number, number])];
+    }
+    if (geojson.type === 'MultiPolygon') {
+      return geojson.coordinates.map((poly: number[][][]) =>
+        poly[0].map((c: number[]) => [c[1], c[0]] as [number, number])
+      );
+    }
+    return [];
+  };
+
+  if (loading) return <div className="p-4 space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14 rounded-xl" />)}</div>;
+
+  const activeDists = districts.filter(d => d.available);
+  const inactiveDists = districts.filter(d => !d.available);
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Top bar */}
+      <div className="shrink-0 p-3 bg-white border-b flex items-center gap-2 flex-wrap">
+        <div className="flex rounded-lg overflow-hidden border text-xs font-medium">
+          <button onClick={() => setView('list')} className={`px-3 py-1.5 ${view === 'list' ? 'bg-indigo-600 text-white' : 'text-slate-600'}`}>☰ Ro'yxat</button>
+          <button onClick={() => setView('map')} className={`px-3 py-1.5 ${view === 'map' ? 'bg-indigo-600 text-white' : 'text-slate-600'}`}>🗺 Xarita</button>
+        </div>
+        <div className="flex items-center gap-1.5 ml-auto">
+          <span className="text-xs text-green-600 font-semibold">{activeDists.length} faol</span>
+          <span className="text-xs text-slate-400">·</span>
+          <span className="text-xs text-slate-500">{inactiveDists.length} nofaol</span>
+        </div>
+        <Button size="sm" variant="outline" className="text-xs h-8"
+          onClick={fetchAllPolygons} disabled={loadingPolygons}>
+          {loadingPolygons ? `${polyProgress}% ...` : '🌍 Chegaralar'}
+        </Button>
+      </div>
+
+      {/* Map view */}
+      {view === 'map' && (
+        <div className="flex-1 relative" style={{ minHeight: 400 }}>
+          <MapContainer center={[41.3, 69.3]} zoom={9} style={{ height: '100%', width: '100%', minHeight: 400 }}>
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              attribution='© <a href="https://openstreetmap.org">OpenStreetMap</a>' />
+            {districts.map(d => {
+              const polygons = geojsonToLeaflet(d.geojson);
+              const color = d.available ? '#16a34a' : '#94a3b8';
+              const fillColor = d.available ? '#16a34a' : '#94a3b8';
+              const name = lang === 'ru' ? d.nameRu : lang === 'en' ? d.nameEn : d.nameUz;
+              return (
+                <div key={d.id}>
+                  {polygons.length > 0 ? (
+                    polygons.map((coords, pi) => (
+                      <Polygon key={`${d.id}-${pi}`} positions={coords}
+                        pathOptions={{ color, fillColor, fillOpacity: 0.35, weight: 2 }}
+                        eventHandlers={{ click: () => { setSelected(d); setExtraFee(String(d.courierExtraFee ?? 0)); } }}>
+                        <Tooltip sticky>{name} · {d.available ? t.districtActive : t.districtInactive}</Tooltip>
+                      </Polygon>
+                    ))
+                  ) : (
+                    <Marker position={[d.lat, d.lng]}
+                      eventHandlers={{ click: () => { setSelected(d); setExtraFee(String(d.courierExtraFee ?? 0)); } }}>
+                      <Tooltip>{name}</Tooltip>
+                    </Marker>
+                  )}
+                </div>
+              );
+            })}
+          </MapContainer>
+
+          {/* Map legend */}
+          <div className="absolute bottom-4 left-4 z-[400] bg-white rounded-xl shadow-lg p-3 text-xs space-y-1.5">
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-sm bg-green-600 opacity-70" /><span>Faol tuman</span></div>
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-sm bg-slate-400 opacity-70" /><span>Nofaol tuman</span></div>
+            <div className="text-slate-400 text-[10px] mt-1">Bosing → tahrirlash</div>
+          </div>
+        </div>
+      )}
+
+      {/* List view */}
+      {view === 'list' && (
+        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {[...activeDists, ...inactiveDists].map(d => {
+            const name = lang === 'ru' ? d.nameRu : lang === 'en' ? d.nameEn : d.nameUz;
+            return (
+              <Card key={d.id} className={`p-3.5 border-0 shadow-sm flex items-center gap-3 cursor-pointer transition-colors ${selected?.id === d.id ? 'ring-2 ring-indigo-400' : ''}`}
+                onClick={() => { setSelected(d); setExtraFee(String(d.courierExtraFee ?? 0)); }}>
+                <div className={`w-3 h-3 rounded-full shrink-0 ${d.available ? 'bg-green-500' : 'bg-slate-300'}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-sm truncate">{name}</div>
+                  <div className="text-[11px] text-slate-400 flex items-center gap-2">
+                    <span>{d.available ? t.districtActive : t.districtInactive}</span>
+                    {d.courierExtraFee > 0 && <span className="text-amber-600">+{d.courierExtraFee.toLocaleString()}</span>}
+                    {d.geojson && <span className="text-teal-600">🗺</span>}
+                  </div>
+                </div>
+                <button onClick={e => { e.stopPropagation(); toggle(d.id, d.available); }}
+                  disabled={toggling === d.id}
+                  className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${d.available ? 'bg-red-100 text-red-600 hover:bg-red-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
+                  {toggling === d.id ? '...' : d.available ? '✕ O\'ch' : '✓ Faol'}
+                </button>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {/* District detail bottom sheet */}
+      <AnimatePresence>
+        {selected && (
+          <>
+            <motion.div className="fixed inset-0 bg-black/40 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setSelected(null)} />
+            <motion.div className="fixed bottom-0 inset-x-0 bg-white rounded-t-3xl z-50 p-5 space-y-4 max-w-md mx-auto"
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 25, stiffness: 300 }}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-base">{lang === 'ru' ? selected.nameRu : lang === 'en' ? selected.nameEn : selected.nameUz}</h3>
+                  <span className={`text-xs font-semibold ${selected.available ? 'text-green-600' : 'text-slate-400'}`}>
+                    {selected.available ? `✅ ${t.districtActive}` : `⛔ ${t.districtInactive}`}
+                  </span>
+                </div>
+                <button onClick={() => setSelected(null)} className="text-slate-400 text-xl leading-none">✕</button>
+              </div>
+
+              <Button className={`w-full h-11 rounded-xl ${selected.available ? 'bg-red-500 hover:bg-red-600' : 'bg-green-600 hover:bg-green-700'}`}
+                onClick={() => toggle(selected.id, selected.available)} disabled={toggling === selected.id}>
+                {toggling === selected.id ? '...' : selected.available ? `⛔ ${t.deactivateDistrict}` : `✅ ${t.activateDistrict}`}
+              </Button>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{t.extraFee} (so'm)</label>
+                <div className="flex gap-2">
+                  <Input type="number" value={extraFee} onChange={e => setExtraFee(e.target.value)}
+                    className="h-11 flex-1 text-base" placeholder="0" />
+                  <Button className="h-11 px-4 bg-indigo-600 hover:bg-indigo-700" onClick={() => saveExtraFee(selected.id)}>
+                    {t.save}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="text-xs text-slate-400 flex items-center justify-between">
+                <span>📍 {selected.lat.toFixed(4)}, {selected.lng.toFixed(4)}</span>
+                <span>{selected.geojson ? '🗺 Chegara bor' : '⚠️ Chegara yo\'q'}</span>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -320,7 +568,6 @@ function StaffTab({ tgId, lang, t }: { tgId: number; lang: Lang; t: typeof T.uz 
 
   return (
     <div className="p-4 space-y-4">
-      {/* Add staff form */}
       <Card className="p-4 space-y-3 border-0 shadow-sm">
         <div className="flex items-center gap-2">
           <UserPlus size={16} className="text-indigo-600" />
@@ -347,7 +594,6 @@ function StaffTab({ tgId, lang, t }: { tgId: number; lang: Lang; t: typeof T.uz 
         {msg && <p className="text-center text-green-600 text-sm font-medium">{msg}</p>}
       </Card>
 
-      {/* Staff list */}
       <div className="space-y-2">
         <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide px-1">{t.staffList}</p>
         {loading ? Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-14 rounded-xl" />) :
@@ -402,7 +648,6 @@ function SettingsTab({ tgId, t }: { tgId: number; t: typeof T.uz }) {
     { key: 'payment_card', label: t.cardNumber, type: 'text' },
     { key: 'payment_owner', label: t.cardOwner, type: 'text' },
     { key: 'click_payment_url', label: t.clickUrl, type: 'url' },
-    { key: 'allowed_region_ids', label: t.allowedDistricts, type: 'text' },
   ];
 
   if (loading) return <div className="p-4 space-y-3">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}</div>;
@@ -471,7 +716,7 @@ function BroadcastTab({ tgId, t }: { tgId: number; t: typeof T.uz }) {
           className="rounded-xl bg-green-50 border border-green-200 p-4 text-center">
           <div className="text-2xl mb-1">✅</div>
           <div className="font-semibold text-green-700">{t.messageSent}</div>
-          <div className="text-sm text-green-600">{result.sent} ta foydalanuvchiga yuborildi</div>
+          <div className="text-sm text-green-600 mt-1">{result.sent} ta foydalanuvchiga yuborildi</div>
         </motion.div>
       )}
     </div>
@@ -481,11 +726,13 @@ function BroadcastTab({ tgId, t }: { tgId: number; t: typeof T.uz }) {
 // ─── Shared components ────────────────────────────────────────────────────────
 function StatCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: any; color: string }) {
   return (
-    <Card className="p-3.5 border-0 shadow-sm flex items-center gap-3">
-      <div className={`w-10 h-10 rounded-xl ${color} text-white flex items-center justify-center shrink-0`}>{icon}</div>
-      <div>
-        <div className="text-xs text-slate-500">{label}</div>
-        <div className="font-bold text-lg leading-tight">{typeof value === 'number' ? value.toLocaleString() : value}</div>
+    <Card className="p-4 border-0 shadow-sm">
+      <div className="flex items-center gap-3">
+        <div className={`w-10 h-10 ${color} rounded-xl flex items-center justify-center text-white`}>{icon}</div>
+        <div>
+          <div className="text-xl font-bold">{value}</div>
+          <div className="text-xs text-slate-500">{label}</div>
+        </div>
       </div>
     </Card>
   );
@@ -494,7 +741,7 @@ function StatCard({ icon, label, value, color }: { icon: React.ReactNode; label:
 function EmptyState({ text }: { text: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-      <div className="text-5xl mb-3">📭</div>
+      <div className="text-4xl mb-2">📭</div>
       <p className="text-sm">{text}</p>
     </div>
   );
@@ -514,11 +761,9 @@ function LoadingScreen({ text }: { text: string }) {
 function AccessDenied() {
   return (
     <div className="h-[100dvh] flex flex-col items-center justify-center p-8">
-      <div className="text-center space-y-3">
-        <div className="text-6xl">🚫</div>
-        <h2 className="text-xl font-bold">Ruxsat yo'q</h2>
-        <p className="text-slate-500 text-sm">Siz admin emassiz</p>
-      </div>
+      <div className="text-6xl mb-3">🔒</div>
+      <h2 className="text-xl font-bold">Ruxsat yo'q</h2>
+      <p className="text-slate-500 text-sm mt-2">Bu panel faqat adminlar uchun</p>
     </div>
   );
 }

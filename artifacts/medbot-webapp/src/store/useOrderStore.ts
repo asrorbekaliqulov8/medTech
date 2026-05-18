@@ -3,7 +3,7 @@ import { create } from 'zustand';
 type PatientType = 'adult' | 'child' | null;
 type Gender = 'male' | 'female' | null;
 
-interface OrderState {
+export interface OrderState {
   serviceId: string | null;
   patientType: PatientType;
   patientName: string;
@@ -19,32 +19,30 @@ interface OrderState {
   latitude: number | null;
   longitude: number | null;
   addressNote: string;
-  
-  // Actions
-  updateField: <K extends keyof Omit<OrderState, 'updateField' | 'reset'>>(field: K, value: OrderState[K]) => void;
+  updateField: (field: string, value: unknown) => void;
   reset: () => void;
 }
 
 const initialState = {
-  serviceId: null,
-  patientType: null,
+  serviceId: null as string | null,
+  patientType: null as PatientType,
   patientName: '',
-  patientAge: '',
-  patientGender: null,
-  childTiming: null,
-  usesDiaper: null,
-  complaints: [],
+  patientAge: '' as number | '',
+  patientGender: null as Gender,
+  childTiming: null as string | null,
+  usesDiaper: null as boolean | null,
+  complaints: [] as string[],
   customComplaint: '',
-  deliverySlot: null,
-  pickupSlot: null,
-  districtId: null,
-  latitude: null,
-  longitude: null,
+  deliverySlot: null as string | null,
+  pickupSlot: null as string | null,
+  districtId: null as string | null,
+  latitude: null as number | null,
+  longitude: null as number | null,
   addressNote: '',
 };
 
 export const useOrderStore = create<OrderState>((set) => ({
   ...initialState,
-  updateField: (field, value) => set((state) => ({ ...state, [field]: value })),
-  reset: () => set(initialState),
+  updateField: (field: string, value: unknown) => set((state) => ({ ...state, [field]: value })),
+  reset: () => set((state) => ({ ...state, ...initialState })),
 }));

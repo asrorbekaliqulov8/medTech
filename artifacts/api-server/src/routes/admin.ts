@@ -39,7 +39,7 @@ router.get("/admin/orders", requireRole("admin"), async (req, res) => {
 });
 
 router.patch("/admin/orders/:orderId", requireRole("admin"), async (req, res) => {
-  const { orderId } = req.params;
+  const orderId = String(req.params.orderId);
   const { status } = req.body as { status: string };
 
   if (!["approved", "rejected", "completed"].includes(status)) {

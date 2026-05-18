@@ -158,6 +158,10 @@ components:
           type: number
         available:
           type: boolean
+        courierExtraFee:
+          type: number
+        geojson:
+          nullable: true
         osmRelationId:
           type: ["string", "null"]
 

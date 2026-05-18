@@ -7,13 +7,15 @@ import { Wizard } from "@/components/wizard/Wizard";
 import AdminPanel from "@/pages/AdminPanel";
 import DoctorPanel from "@/pages/DoctorPanel";
 import CourierPanel from "@/pages/CourierPanel";
+import LandingPage from "@/pages/LandingPage";
 
 const queryClient = new QueryClient();
 
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={Wizard} />
+      <Route path="/" component={LandingPage} />
+      <Route path="/app" component={Wizard} />
       <Route path="/admin" component={AdminPanel} />
       <Route path="/doctor" component={DoctorPanel} />
       <Route path="/courier" component={CourierPanel} />

@@ -17,6 +17,8 @@ export interface District {
   lat: number;
   lng: number;
   available: boolean;
+  courierExtraFee?: number;
+  geojson?: unknown | null;
   /** @nullable */
   osmRelationId?: string | null;
 }

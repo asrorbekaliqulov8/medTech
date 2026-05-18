@@ -24,7 +24,7 @@ router.get("/courier/orders", requireRole("courier", "admin"), async (req, res) 
 });
 
 router.post("/courier/orders/:orderId/done", requireRole("courier", "admin"), async (req, res) => {
-  const { orderId } = req.params;
+  const orderId = String(req.params.orderId);
 
   const [order] = await db.select().from(ordersTable).where(eq(ordersTable.orderId, orderId));
   if (!order) { res.status(404).json({ error: "Order not found" }); return; }

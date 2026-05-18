@@ -22,7 +22,7 @@ export async function tgSendDocument(
   try {
     const form = new FormData();
     form.append("chat_id", String(chatId));
-    form.append("document", new Blob([fileBuffer]), filename);
+    form.append("document", new Blob([Uint8Array.from(fileBuffer)]), filename);
     if (caption) {
       form.append("caption", caption);
       form.append("parse_mode", "HTML");
@@ -43,7 +43,7 @@ export async function tgSendPhoto(
   try {
     const form = new FormData();
     form.append("chat_id", String(chatId));
-    form.append("photo", new Blob([fileBuffer]), "result.jpg");
+    form.append("photo", new Blob([Uint8Array.from(fileBuffer)]), "result.jpg");
     if (caption) {
       form.append("caption", caption);
       form.append("parse_mode", "HTML");
