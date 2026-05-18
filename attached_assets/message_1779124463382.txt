@@ -1,0 +1,91 @@
+
+## Loyha rejasi
+
+Telegram bot (Python) saqlanib qoladi, lekin uning yonida **Lovable Cloud** (PostgreSQL + Auth) backend ishga tushiriladi. Web panellar va Telegram Mini App shu bitta DB bilan ishlaydi. Python botni keyinroq shu DB ga ulash kerak (bot kodida `psycopg2` yoki Supabase REST orqali). Hozir men **web qismini to'liq quraman**.
+
+## Texnologiya
+- TanStack Start + React + Tailwind + shadcn
+- Lovable Cloud (DB, Auth, Storage)
+- OpenStreetMap + Leaflet (xaritalar, GeoJSON district chegaralari)
+- Nominatim (geocoding — tuman nomidan koordinata)
+- i18n: uz/ru/en
+
+## Endpointlar (routelar)
+- `/` — landing
+- `/app` — **User Mini App**: buyurtma berish, natijalar, profil, fikr (Telegram WebApp SDK ga moslangan)
+- `/admin` — Admin panel (login)
+- `/doctor` — Doctor panel (login)
+- `/courier` — Courier panel (login)
+- `/login` — umumiy auth
+
+## DB schema (asosiy jadvallar)
+- `profiles` (id, tg_id, lang, phone, role)
+- `user_roles` (user_id, role: admin|doctor|courier|client)
+- `districts` (id, name_uz/ru/en, geojson, active, lat, lng, courier_extra_fee)
+- `services` (id, name, price, pickup_extra, instruction_file)
+- `orders` (id, public_id, patient_name, age, gender, patient_type, symptoms, address, lat/lng, district_id, delivery_slot, pickup_slot, status, total, receipt_url, courier_id, doctor_id)
+- `results` (order_id, file_url, notes, doctor_id)
+- `complaints` (user_id, order_id, rating, type, comment)
+- `settings` (force_subscribe, channel_id, card_number, card_owner, instructions)
+- `broadcasts` (text, media, sent_count)
+
+## Admin panel — to'liq mukammal
+**Dashboard** (mobile-first minimal):
+- Bugungi buyurtmalar, tushum, faol kuryerlar, kutilayotgan to'lovlar (KPI cards)
+- Oxirgi buyurtmalar feed
+- Tumanlar bo'yicha heat chart
+
+**Tumanlar bo'limi** (klyuchevoy):
+- OpenStreetMap to'liq Tashkent viloyati tumanlari **alohida chegaralari chizilgan** (GeoJSON polygon overlay)
+- Har bir polygonga hover → tuman nomi tooltip
+- Bossa → modal: "Faollashtirish / O'chirish", qo'shimcha to'lov belgilash
+- Faol tumanlar yashil, faol emas — kulrang
+- **Tuman qo'shish**: ikkita yo'l
+  1. Nomini yozish → Nominatim avtomatik koordinata + chegara
+  2. Xaritadan polygon chizish (leaflet-draw)
+
+**Buyurtmalar**: list + filter (status, district, sana), to'lov chekini ko'rish, tasdiqlash/rad etish → doctor va kuryerga avto-assign
+
+**User typelar**: admin/doctor/courier qo'shish, kuryerga tumanlar biriktirish (multi-select map)
+
+**Sozlamalar**: majburiy obuna kanal, karta raqami/egasi, xizmat narxi, pickup qo'shimcha, taglik instruction (file upload)
+
+**Reklama**: broadcast yuborish (rate-limited 25/sec)
+
+**Statistika**: detalli grafiklar (Recharts)
+
+## User Web App (`/app`)
+- Telegram WebApp SDK integratsiyasi (tg.initData orqali auth)
+- Buyurtma berish wizard: Katta/Bola → ism → yosh → simptomlar checkbox → delivery/pickup slot
+- **Manzil tanlash**: 
+  - "Joriy joylashuv" tugmasi (geolocation API)
+  - Yoki xaritadan tanlash — **faqat faol tumanlar yashil polygon bilan ko'rinadi**
+  - Agar nuqta faol tuman tashqarisida → "Sizning hududingizda xizmat yo'q. Eng yaqin: **X tumani**" tavsiyasi (Haversine distance)
+- Order summary → karta to'lov → chek yuklash
+- Natijalar tab, Profil (Patient ID, bonuslar, 5-buyurtma chegirma), Fikr formasi
+
+## Doctor panel
+- Yangi buyurtmalar inbox
+- Bemor ma'lumotlari + simptomlar
+- Natija yuklash (PDF/rasm) + izoh → user ga avto yuboriladi
+
+## Courier panel
+- Belgilangan tumanlardagi buyurtmalar
+- Map view: marshrut
+- Status: konteyner berildi / namuna olindi / topshirildi
+
+## Dizayn
+- Minimalistik, oq fon, bitta accent rang (medical teal `oklch(0.7 0.13 200)`)
+- Mobile-first (panellar ham mobile da qulay)
+- Cards, lots of whitespace, Inter font
+- Mayda mikro-animatsiyalar
+
+## Bosqichlar
+1. Cloud yoqish + DB schema + RLS + seed (Tashkent tumanlari GeoJSON)
+2. Auth + role guard + layout
+3. Admin: dashboard + tumanlar xaritasi (asosiy fitcha)
+4. Admin: buyurtmalar, sozlamalar, userlar, reklama, statistika
+5. User Mini App: order wizard + map district selection
+6. Doctor + Courier panellari
+7. Landing + i18n
+

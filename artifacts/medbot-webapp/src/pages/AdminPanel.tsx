@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { TelegramGuard } from '@/components/TelegramGuard';
 import { useStaffAuth } from '@/hooks/useStaffAuth';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -137,11 +136,7 @@ async function api(path: string, opts: RequestInit = {}) {
 }
 
 export default function AdminPanel() {
-  return (
-    <TelegramGuard>
-      <AdminPanelInner />
-    </TelegramGuard>
-  );
+  return <AdminPanelInner />;
 }
 
 function AdminPanelInner() {

@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { TelegramGuard } from '@/components/TelegramGuard';
 import { useStaffAuth } from '@/hooks/useStaffAuth';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -69,11 +68,7 @@ function openYandex(lat: number, lng: number) {
 }
 
 export default function CourierPanel() {
-  return (
-    <TelegramGuard>
-      <CourierPanelInner />
-    </TelegramGuard>
-  );
+  return <CourierPanelInner />;
 }
 
 function CourierPanelInner() {
