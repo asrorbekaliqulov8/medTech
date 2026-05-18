@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStaffAuth } from '@/hooks/useStaffAuth';
 import { Badge } from '@/components/ui/badge';
@@ -145,6 +145,13 @@ function AdminPanelInner() {
   const [authorized, setAuthorized] = useState<boolean | null>(null);
   const [tab, setTab] = useState<Tab>('orders');
 
+  const urlTab = new URLSearchParams(window.location.search).get('tab');
+  const initialFilter = urlTab === 'pending' ? 'pending_admin' : 'all';
+
+  useEffect(() => {
+    if (urlTab === 'pending') setTab('orders');
+  }, []);
+
   useEffect(() => {
     if (!tgId) { setAuthorized(false); return; }
     api(`/api/staff/me?tg_id=${tgId}`)
@@ -188,7 +195,7 @@ function AdminPanelInner() {
       <div className="flex-1 overflow-y-auto">
         <AnimatePresence mode="wait">
           <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.15 }}>
-            {tab === 'orders' && <OrdersTab tgId={tgId} lang={lang} t={t} />}
+            {tab === 'orders' && <OrdersTab tgId={tgId} lang={lang} t={t} initialFilter={initialFilter} />}
             {tab === 'districts' && <DistrictsTab tgId={tgId} lang={lang} t={t} />}
             {tab === 'staff' && <StaffTab tgId={tgId} lang={lang} t={t} />}
             {tab === 'settings' && <SettingsTab tgId={tgId} t={t} />}
@@ -201,12 +208,13 @@ function AdminPanelInner() {
 }
 
 // ─── Orders Tab ───────────────────────────────────────────────────────────────
-function OrdersTab({ tgId, lang, t }: { tgId: number; lang: Lang; t: typeof T.uz }) {
+function OrdersTab({ tgId, lang, t, initialFilter = 'all' }: { tgId: number; lang: Lang; t: typeof T.uz; initialFilter?: string }) {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState(initialFilter);
   const [stats, setStats] = useState<any>(null);
   const [acting, setActing] = useState<string | null>(null);
+  const [actError, setActError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -223,8 +231,18 @@ function OrdersTab({ tgId, lang, t }: { tgId: number; lang: Lang; t: typeof T.uz
 
   const act = async (orderId: string, status: string) => {
     setActing(orderId);
-    try { await api(`/api/admin/orders/${orderId}?tg_id=${tgId}`, { method: 'PATCH', body: JSON.stringify({ status }) }); await load(); }
-    finally { setActing(null); }
+    setActError(null);
+    try {
+      await api(`/api/admin/orders/${orderId}?tg_id=${tgId}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+      await load();
+    } catch (e: any) {
+      if (e.message?.includes('already processed') || e.message?.includes('409')) {
+        setActError('Bu buyurtma boshqa admin tomonidan allaqachon tasdiqlangan yoki rad etilgan.');
+      } else {
+        setActError(e.message || 'Xatolik yuz berdi');
+      }
+      await load();
+    } finally { setActing(null); }
   };
 
   const filters = [
@@ -243,6 +261,13 @@ function OrdersTab({ tgId, lang, t }: { tgId: number; lang: Lang; t: typeof T.uz
           <StatCard icon={<DollarSign size={18} />} label={t.revenue} value={`${Number(stats.revenue).toLocaleString()}`} color="bg-green-500" />
           <StatCard icon={<Clock size={18} />} label={t.pending} value={stats.pendingAdminOrders} color="bg-orange-500" />
           <StatCard icon={<CalendarDays size={18} />} label={t.today} value={stats.todayOrders} color="bg-indigo-500" />
+        </div>
+      )}
+
+      {actError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl px-4 py-3 flex items-center justify-between">
+          <span>⚠️ {actError}</span>
+          <button onClick={() => setActError(null)} className="ml-2 text-red-400 hover:text-red-600">✕</button>
         </div>
       )}
 
@@ -422,7 +447,7 @@ function DistrictsTab({ tgId, lang, t }: { tgId: number; lang: Lang; t: typeof T
               const fillColor = d.available ? '#16a34a' : '#94a3b8';
               const name = lang === 'ru' ? d.nameRu : lang === 'en' ? d.nameEn : d.nameUz;
               return (
-                <div key={d.id}>
+                <Fragment key={d.id}>
                   {polygons.length > 0 ? (
                     polygons.map((coords, pi) => (
                       <Polygon key={`${d.id}-${pi}`} positions={coords}
@@ -437,7 +462,7 @@ function DistrictsTab({ tgId, lang, t }: { tgId: number; lang: Lang; t: typeof T
                       <Tooltip>{name}</Tooltip>
                     </Marker>
                   )}
-                </div>
+                </Fragment>
               );
             })}
           </MapContainer>
@@ -532,6 +557,8 @@ function StaffTab({ tgId, lang, t }: { tgId: number; lang: Lang; t: typeof T.uz 
   const [form, setForm] = useState({ tg_id: '', role: 'courier', region_id: '' });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
+  const [userSuggestions, setUserSuggestions] = useState<number[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -540,6 +567,12 @@ function StaffTab({ tgId, lang, t }: { tgId: number; lang: Lang; t: typeof T.uz 
   };
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    api(`/api/admin/users?tg_id=${tgId}`)
+      .then((rows: { tgId: number }[]) => setUserSuggestions(rows.map(r => r.tgId)))
+      .catch(() => {});
+  }, [tgId]);
 
   const addStaff = async () => {
     if (!form.tg_id) return;
@@ -568,9 +601,30 @@ function StaffTab({ tgId, lang, t }: { tgId: number; lang: Lang; t: typeof T.uz 
           <UserPlus size={16} className="text-indigo-600" />
           <span className="font-semibold text-sm">{t.addNew}</span>
         </div>
-        <Input placeholder={`${t.tgId} (e.g. 12345678)`} value={form.tg_id}
-          onChange={e => setForm(f => ({ ...f, tg_id: e.target.value }))}
-          className="h-11 text-base" type="number" />
+        <div className="relative">
+          <Input placeholder={`${t.tgId} (e.g. 12345678)`} value={form.tg_id}
+            onChange={e => { setForm(f => ({ ...f, tg_id: e.target.value })); setShowSuggestions(true); }}
+            onFocus={() => setShowSuggestions(true)}
+            onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+            className="h-11 text-base" type="number" />
+          {showSuggestions && form.tg_id.length >= 3 && (
+            <div className="absolute top-full left-0 right-0 z-50 bg-white border rounded-lg shadow-lg max-h-40 overflow-y-auto mt-1">
+              {userSuggestions
+                .filter(id => String(id).includes(form.tg_id))
+                .slice(0, 8)
+                .map(id => (
+                  <button key={id} type="button"
+                    onMouseDown={() => { setForm(f => ({ ...f, tg_id: String(id) })); setShowSuggestions(false); }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-b last:border-0 font-mono">
+                    {id}
+                  </button>
+                ))}
+              {userSuggestions.filter(id => String(id).includes(form.tg_id)).length === 0 && (
+                <div className="px-3 py-2 text-xs text-slate-400">Topilmadi</div>
+              )}
+            </div>
+          )}
+        </div>
         <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
           className="w-full h-11 rounded-lg border bg-background px-3 text-sm">
           <option value="courier">🚗 {t.courier}</option>

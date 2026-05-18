@@ -50,6 +50,11 @@ router.patch("/admin/orders/:orderId", requireRole("admin"), async (req, res) =>
   const [order] = await db.select().from(ordersTable).where(eq(ordersTable.orderId, orderId));
   if (!order) { res.status(404).json({ error: "Order not found" }); return; }
 
+  if (status !== "completed" && order.status !== "pending_admin") {
+    res.status(409).json({ error: "Order already processed", currentStatus: order.status });
+    return;
+  }
+
   await db.update(ordersTable).set({ status }).where(eq(ordersTable.orderId, orderId));
 
   const lang = order.lang || "uz";
@@ -122,6 +127,11 @@ router.delete("/admin/staff/:staffTgId", requireRole("admin"), async (req, res) 
   const staffTgId = Number(req.params.staffTgId);
   await db.delete(staffUsersTable).where(eq(staffUsersTable.tgId, staffTgId));
   res.json({ success: true });
+});
+
+router.get("/admin/users", requireRole("admin"), async (_req, res) => {
+  const rows = await db.selectDistinct({ tgId: ordersTable.telegramUserId }).from(ordersTable).orderBy(ordersTable.telegramUserId);
+  res.json(rows.map(r => ({ tgId: r.tgId })));
 });
 
 router.post("/admin/broadcast", requireRole("admin"), async (req, res) => {

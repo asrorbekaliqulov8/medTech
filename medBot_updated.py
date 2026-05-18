@@ -1145,19 +1145,25 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_id = update.message.photo[-1].file_id
         update_order(order_id, receipt_file_id=file_id, status="pending_admin")
         await update.message.reply_text(t("receipt_received", lang), parse_mode="HTML")
+        order = get_order(order_id)
+        user = get_user(tg_id)
         for admin_id in ADMIN_IDS:
             try:
-                order = get_order(order_id)
-                user = get_user(tg_id)
                 caption = (
-                    f"💳 <b>Yangi to'lov!</b>\n\n"
+                    f"💳 <b>Yangi to'lov keldi!</b>\n\n"
                     f"🔖 Buyurtma: <code>{order_id}</code>\n"
-                    f"👤 Foydalanuvchi: {user.get('patient_id')} | <code>{tg_id}</code>\n"
-                    f"💰 Summa: <b>{((order['price'] or 0) + (order['extra_price'] or 0)):,} so'm</b>"
+                    f"👤 Foydalanuvchi: <code>{tg_id}</code>\n"
+                    f"💰 Summa: <b>{((order['price'] or 0) + (order['extra_price'] or 0)):,} so'm</b>\n\n"
+                    f"⬇️ Web paneldan tasdiqlang yoki rad eting"
                 )
+                admin_lang = lang_of_ctx(context, admin_id)
+                pending_url = f"{WEBAPP_URL}admin?tg_id={admin_id}&lang={admin_lang}&tab=pending"
+                notify_kb = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🛠 Web paneldan tasdiqlash", web_app=WebAppInfo(url=pending_url)),
+                ]])
                 await context.bot.send_photo(
                     admin_id, file_id, caption=caption,
-                    reply_markup=admin_payment_kb(order_id), parse_mode="HTML"
+                    reply_markup=notify_kb, parse_mode="HTML"
                 )
             except Exception:
                 pass
@@ -1265,14 +1271,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_admin_panel(update, context, tg_id)
         return
     if text == "/doctor":
-        user = get_user(tg_id)
-        if user and user.get("role") == "doctor":
-            await send_doctor_panel(update, context, tg_id)
+        await send_doctor_panel(update, context, tg_id)
         return
     if text == "/courier":
-        user = get_user(tg_id)
-        if user and user.get("role") == "courier":
-            await send_courier_panel(update, context, tg_id)
+        await send_courier_panel(update, context, tg_id)
         return
 
     if text == "⬅️ Orqaga" and tg_id in ADMIN_IDS and step.startswith("admin_select_user_for_"):
@@ -1485,8 +1487,10 @@ async def send_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE, t
     set_state(context, step="admin_panel")
     lang = lang_of_ctx(context, tg_id)
     webapp_url = f"{WEBAPP_URL}admin?tg_id={tg_id}&lang={lang}"
+    pending_url = f"{WEBAPP_URL}admin?tg_id={tg_id}&lang={lang}&tab=pending"
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🛠 Admin panelni ochish", web_app=WebAppInfo(url=webapp_url))],
+        [InlineKeyboardButton("💳 Kutilayotgan to'lovlar", web_app=WebAppInfo(url=pending_url))],
         [
             InlineKeyboardButton("⚙️ Sozlamalar",     callback_data="admin_settings"),
             InlineKeyboardButton("👥 Xodimlar",       callback_data="admin_users"),
