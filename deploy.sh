@@ -77,6 +77,15 @@ echo -e "  Papka   : ${APP_DIR}"
 echo -e "  Admin   : ${ADMIN_IDS}"
 if [[ "$UPDATE_ONLY" == true ]]; then
   echo -e "  Rejim   : ${YELLOW}YANGILASH (update)${RESET}"
+  # Auto-read DATABASE_URL from existing .env if not passed via -db
+  if [[ -z "$DATABASE_URL" ]] && [[ -f "${APP_DIR}/.env" ]]; then
+    DATABASE_URL=$(grep '^DATABASE_URL=' "${APP_DIR}/.env" | cut -d'=' -f2-)
+    [[ -n "$DATABASE_URL" ]] && echo -e "  ${GREEN}DATABASE_URL .env dan o'qildi${RESET}"
+  fi
+  if [[ -z "$DATABASE_URL" ]] && [[ -f "${APP_DIR}/artifacts/api-server/.env" ]]; then
+    DATABASE_URL=$(grep '^DATABASE_URL=' "${APP_DIR}/artifacts/api-server/.env" | cut -d'=' -f2-)
+    [[ -n "$DATABASE_URL" ]] && echo -e "  ${GREEN}DATABASE_URL api-server/.env dan o'qildi${RESET}"
+  fi
 else
   echo -e "  Rejim   : ${GREEN}TO'LIQ O'RNATISH${RESET}"
 fi
