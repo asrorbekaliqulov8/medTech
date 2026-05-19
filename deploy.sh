@@ -182,6 +182,7 @@ cat > "${APP_DIR}/artifacts/api-server/.env" <<EOF
 DATABASE_URL=${DATABASE_URL}
 PORT=${API_PORT}
 NODE_ENV=production
+ADMIN_IDS=${ADMIN_IDS}
 EOF
 
 # Webapp build .env
@@ -227,7 +228,7 @@ log "API server build (esbuild)..."
 pnpm --filter @workspace/api-server run build 2>&1 | tail -3
 
 log "React WebApp build (Vite)..."
-pnpm --filter @workspace/medbot-webapp run build 2>&1 | tail -3
+PORT=5000 BASE_PATH=/ pnpm --filter @workspace/medbot-webapp run build 2>&1 | tail -3
 ok "Build → ${DIST_DIR}"
 
 # ═════════════════════════════════════════════
@@ -329,7 +330,7 @@ server {
 
     # API proxy → Express server (ichki port ${API_PORT})
     location /api/ {
-        proxy_pass         http://127.0.0.1:${API_PORT}/api/;
+        proxy_pass         http://127.0.0.1:${API_PORT};
         proxy_http_version 1.1;
         proxy_set_header   Host              \$host;
         proxy_set_header   X-Real-IP         \$remote_addr;
