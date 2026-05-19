@@ -27,6 +27,7 @@ export const ordersTable = pgTable("orders", {
   extraPrice: integer("extra_price").notNull().default(0),
   isFree: boolean("is_free").notNull().default(false),
   status: text("status").notNull().default("pending_payment"),
+  paymentMethod: text("payment_method"),
   receiptFileId: text("receipt_file_id"),
   resultFileId: text("result_file_id"),
   courierTgId: bigint("courier_tg_id", { mode: "number" }),

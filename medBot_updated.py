@@ -449,207 +449,352 @@ COMPLAINT_KEYS = [
     "complaint_weight_loss",  "complaint_blood",    "complaint_parasite", "complaint_allergy"
 ]
 
-# ─── DATABASE ─────────────────────────────────────────────────────────────────
+# ─── DATABASE (PostgreSQL) ────────────────────────────────────────────────────
+try:
+    import psycopg2
+    import psycopg2.extras
+    _PG_AVAILABLE = True
+except Exception:
+    _PG_AVAILABLE = False
+
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+# SQLite fallback path (used only when DATABASE_URL is absent)
 DB_PATH = "medbot.db"
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+# Column name mapping: bot dict keys ↔ PostgreSQL column names
+_ORDER_TO_PG = {
+    "user_tg_id":        "telegram_user_id",
+    "region_id":         "district_id",
+    "service":           "service_id",
+    "assigned_courier_id": "courier_tg_id",
+    "assigned_doctor_id":  "doctor_tg_id",
+}
+_PG_TO_ORDER = {v: k for k, v in _ORDER_TO_PG.items()}
+
+def _use_pg() -> bool:
+    return _PG_AVAILABLE and bool(DATABASE_URL)
+
+# ── low-level helpers ─────────────────────────────────────────────────────────
+
+def _pg_exec(sql: str, params=None, *, fetch: str = "none"):
+    """Execute SQL on PostgreSQL and return rows (or None)."""
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, params)
+            if fetch == "one":
+                result = cur.fetchone()
+            elif fetch == "all":
+                result = cur.fetchall()
+            else:
+                result = None
+        conn.commit()
+        return result
+    finally:
+        conn.close()
+
+def _sqlite_get_db():
+    import sqlite3 as _sqlite3
+    conn = _sqlite3.connect(DB_PATH)
+    conn.row_factory = _sqlite3.Row
     return conn
 
-def init_db():
-    conn = get_db()
+def _sqlite_init():
+    import sqlite3 as _sqlite3
+    conn = _sqlite_get_db()
     c = conn.cursor()
-
     c.execute("""CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY,
-        tg_id INTEGER UNIQUE,
-        lang TEXT DEFAULT 'uz',
-        patient_id TEXT UNIQUE,
-        full_name TEXT,
-        order_count INTEGER DEFAULT 0,
-        bonus_points INTEGER DEFAULT 0,
-        role TEXT DEFAULT 'user',
-        region_id TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )""")
-
+        id INTEGER PRIMARY KEY, tg_id INTEGER UNIQUE, lang TEXT DEFAULT 'uz',
+        patient_id TEXT UNIQUE, full_name TEXT, order_count INTEGER DEFAULT 0,
+        bonus_points INTEGER DEFAULT 0, role TEXT DEFAULT 'user',
+        region_id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
     c.execute("""CREATE TABLE IF NOT EXISTS orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_id TEXT UNIQUE,
-        user_tg_id INTEGER,
-        patient_name TEXT,
-        patient_age INTEGER,
-        patient_gender TEXT,
-        patient_type TEXT,
-        service TEXT,
-        child_timing TEXT,
-        uses_diaper INTEGER,
-        complaints TEXT,
-        delivery_slot TEXT,
-        pickup_slot TEXT,
-        latitude REAL,
-        longitude REAL,
-        region_id TEXT,
-        price INTEGER DEFAULT 0,
-        extra_price INTEGER DEFAULT 0,
-        is_free INTEGER DEFAULT 0,
-        status TEXT DEFAULT 'pending_payment',
-        payment_method TEXT DEFAULT 'pending',
-        assigned_courier_id INTEGER,
-        assigned_doctor_id INTEGER,
-        receipt_file_id TEXT,
-        result_file_id TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )""")
-
-    c.execute("""CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT
-    )""")
-
+        id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT UNIQUE,
+        user_tg_id INTEGER, patient_name TEXT, patient_age INTEGER,
+        patient_gender TEXT, patient_type TEXT, service TEXT,
+        child_timing TEXT, uses_diaper INTEGER, complaints TEXT,
+        delivery_slot TEXT, pickup_slot TEXT, latitude REAL, longitude REAL,
+        region_id TEXT, price INTEGER DEFAULT 0, extra_price INTEGER DEFAULT 0,
+        is_free INTEGER DEFAULT 0, status TEXT DEFAULT 'pending_payment',
+        payment_method TEXT DEFAULT 'pending', assigned_courier_id INTEGER,
+        assigned_doctor_id INTEGER, receipt_file_id TEXT, result_file_id TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS feedback (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_tg_id INTEGER,
-        rating INTEGER,
-        problem_type TEXT,
-        comment TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )""")
-
+        id INTEGER PRIMARY KEY AUTOINCREMENT, user_tg_id INTEGER,
+        rating INTEGER, problem_type TEXT, comment TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
     defaults = {
-        "mandatory_sub":     "1",
-        "channel_id":        CHANNEL_ID,
-        "service_price":     "150000",
-        "pickup_extra":      "30000",
-        "payment_card":      "8600 1234 5678 9012",
-        "payment_owner":     "N-MedHomeLab Admin",
-        "instruction_file_id": "",
-        "admin_contact":     "@admin_username",
+        "mandatory_sub": "1", "channel_id": CHANNEL_ID,
+        "service_price": "150000", "pickup_extra": "30000",
+        "payment_card": "8600 1234 5678 9012",
+        "payment_owner": "N-MedHomeLab Admin",
+        "instruction_file_id": "", "admin_contact": "@admin_username",
         "allowed_region_ids": "4,11,13,15",
         "click_payment_url": "https://my.click.uz/services/pay?service_id=12345&merchant_id=54321",
     }
     for k, v in defaults.items():
         c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
-
     conn.commit()
     conn.close()
 
+def init_db():
+    if not _use_pg():
+        _sqlite_init()
+        return
+    # Seed default settings in PostgreSQL if not already present
+    defaults = {
+        "mandatory_sub": "1", "channel_id": CHANNEL_ID,
+        "service_price": "150000", "pickup_extra": "30000",
+        "payment_card": "8600 1234 5678 9012",
+        "payment_owner": "N-MedHomeLab Admin",
+        "instruction_file_id": "", "admin_contact": "@admin_username",
+        "allowed_region_ids": "4,11,13,15",
+        "click_payment_url": "https://my.click.uz/services/pay?service_id=12345&merchant_id=54321",
+    }
+    for k, v in defaults.items():
+        _pg_exec(
+            "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+            (k, str(v))
+        )
+
+# ── settings ──────────────────────────────────────────────────────────────────
+
 def get_setting(key):
-    conn = get_db()
-    row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
-    conn.close()
+    if not _use_pg():
+        conn = _sqlite_get_db()
+        row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        conn.close()
+        return row["value"] if row else None
+    row = _pg_exec("SELECT value FROM settings WHERE key=%s", (key,), fetch="one")
     return row["value"] if row else None
 
 def set_setting(key, value):
-    conn = get_db()
-    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
-    conn.commit()
-    conn.close()
+    if not _use_pg():
+        conn = _sqlite_get_db()
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
+        conn.commit(); conn.close()
+        return
+    _pg_exec(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
+        (key, str(value))
+    )
 
 def get_allowed_region_ids():
     raw = get_setting("allowed_region_ids") or ""
     return [r.strip() for r in raw.split(",") if r.strip()]
 
+# ── telegram users ────────────────────────────────────────────────────────────
+
 def get_user(tg_id):
-    conn = get_db()
-    user = conn.execute("SELECT * FROM users WHERE tg_id=?", (tg_id,)).fetchone()
-    conn.close()
-    return dict(user) if user else None
+    if not _use_pg():
+        conn = _sqlite_get_db()
+        row = conn.execute("SELECT * FROM users WHERE tg_id=?", (tg_id,)).fetchone()
+        conn.close()
+        return dict(row) if row else None
+    row = _pg_exec("SELECT * FROM telegram_users WHERE tg_id=%s", (tg_id,), fetch="one")
+    return dict(row) if row else None
 
 def create_user(tg_id, lang="uz"):
-    patient_id = f"MED{tg_id % 1000000:06d}"
-    conn = get_db()
-    conn.execute(
-        "INSERT OR IGNORE INTO users (tg_id, lang, patient_id) VALUES (?, ?, ?)",
-        (tg_id, lang, patient_id)
+    if not _use_pg():
+        conn = _sqlite_get_db()
+        pid = f"MED{tg_id % 1000000:06d}"
+        conn.execute("INSERT OR IGNORE INTO users (tg_id, lang, patient_id) VALUES (?, ?, ?)", (tg_id, lang, pid))
+        conn.commit(); conn.close()
+        return
+    pid = f"MED{tg_id % 1000000:06d}"
+    _pg_exec(
+        "INSERT INTO telegram_users (tg_id, lang, patient_id) VALUES (%s, %s, %s) ON CONFLICT (tg_id) DO NOTHING",
+        (tg_id, lang, pid)
     )
-    conn.commit()
-    conn.close()
 
 def update_user(tg_id, **kwargs):
-    conn = get_db()
-    for k, v in kwargs.items():
-        conn.execute(f"UPDATE users SET {k}=? WHERE tg_id=?", (v, tg_id))
-    conn.commit()
-    conn.close()
+    if not _use_pg():
+        conn = _sqlite_get_db()
+        for k, v in kwargs.items():
+            conn.execute(f"UPDATE users SET {k}=? WHERE tg_id=?", (v, tg_id))
+        conn.commit(); conn.close()
+        return
+    role = kwargs.pop("role", None)
+    region_id = kwargs.get("region_id", None)
+    # Update telegram_users fields
+    if kwargs:
+        sets = ", ".join(f"{k}=%s" for k in kwargs)
+        vals = list(kwargs.values()) + [tg_id]
+        _pg_exec(f"UPDATE telegram_users SET {sets} WHERE tg_id=%s", vals)
+    if role is not None:
+        _pg_exec("UPDATE telegram_users SET role=%s WHERE tg_id=%s", (role, tg_id))
+        # Sync courier/doctor role to staff_users
+        if role in ("courier", "doctor"):
+            _pg_exec(
+                """INSERT INTO staff_users (tg_id, role, region_id, lang)
+                   VALUES (%s, %s, %s, 'uz')
+                   ON CONFLICT (tg_id) DO UPDATE SET role=EXCLUDED.role, region_id=EXCLUDED.region_id""",
+                (tg_id, role, region_id)
+            )
 
 def get_all_users():
-    conn = get_db()
-    rows = conn.execute("SELECT * FROM users").fetchall()
-    conn.close()
+    if not _use_pg():
+        conn = _sqlite_get_db()
+        rows = conn.execute("SELECT * FROM users").fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    rows = _pg_exec("SELECT * FROM telegram_users", fetch="all") or []
     return [dict(r) for r in rows]
 
 def get_users_by_role(role):
-    conn = get_db()
-    rows = conn.execute("SELECT * FROM users WHERE role=?", (role,)).fetchall()
-    conn.close()
+    """Returns staff (couriers/doctors) from staff_users table."""
+    if not _use_pg():
+        conn = _sqlite_get_db()
+        rows = conn.execute("SELECT * FROM users WHERE role=?", (role,)).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    rows = _pg_exec("SELECT tg_id, region_id, lang FROM staff_users WHERE role=%s", (role,), fetch="all") or []
     return [dict(r) for r in rows]
+
+# ── orders ────────────────────────────────────────────────────────────────────
 
 def _short_order_id():
     chars = string.ascii_uppercase + string.digits
     return "#" + "".join(random.choices(chars, k=4))
 
+def _pg_row_to_order(row: dict) -> dict:
+    """Map PostgreSQL column names back to bot's expected dict keys."""
+    result = {}
+    for k, v in row.items():
+        result[_PG_TO_ORDER.get(k, k)] = v
+    if "is_free" in result:
+        result["is_free"] = 1 if result["is_free"] else 0
+    if "uses_diaper" in result and result["uses_diaper"] is not None:
+        result["uses_diaper"] = 1 if result["uses_diaper"] else 0
+    return result
+
 def create_order(data: dict):
-    conn = get_db()
-    for _ in range(10):
-        order_id = _short_order_id()
-        exists = conn.execute("SELECT 1 FROM orders WHERE order_id=?", (order_id,)).fetchone()
-        if not exists:
-            break
-    conn.execute("""INSERT INTO orders
-        (order_id, user_tg_id, patient_name, patient_age, patient_gender, patient_type,
-         service, child_timing, uses_diaper, complaints, delivery_slot, pickup_slot,
-         latitude, longitude, region_id, price, extra_price, is_free)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
-        order_id, data["user_tg_id"], data["patient_name"], data["patient_age"],
-        data["patient_gender"], data["patient_type"], data["service"],
-        data.get("child_timing", ""), data.get("uses_diaper", 0),
-        json.dumps(data.get("complaints", []), ensure_ascii=False),
-        data.get("delivery_slot", ""), data.get("pickup_slot", ""),
-        data.get("latitude"), data.get("longitude"), data.get("region_id", ""),
-        data.get("price", 0), data.get("extra_price", 0), data.get("is_free", 0)
-    ))
-    conn.execute("UPDATE users SET order_count = order_count + 1 WHERE tg_id=?", (data["user_tg_id"],))
-    conn.commit()
-    conn.close()
+    if not _use_pg():
+        conn = _sqlite_get_db()
+        for _ in range(10):
+            oid = _short_order_id()
+            if not conn.execute("SELECT 1 FROM orders WHERE order_id=?", (oid,)).fetchone():
+                break
+        conn.execute(
+            """INSERT INTO orders (order_id,user_tg_id,patient_name,patient_age,patient_gender,
+               patient_type,service,child_timing,uses_diaper,complaints,delivery_slot,pickup_slot,
+               latitude,longitude,region_id,price,extra_price,is_free)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (oid, data["user_tg_id"], data["patient_name"], data["patient_age"],
+             data["patient_gender"], data["patient_type"], data["service"],
+             data.get("child_timing",""), data.get("uses_diaper",0),
+             json.dumps(data.get("complaints",[]), ensure_ascii=False),
+             data.get("delivery_slot",""), data.get("pickup_slot",""),
+             data.get("latitude"), data.get("longitude"), data.get("region_id",""),
+             data.get("price",0), data.get("extra_price",0), data.get("is_free",0))
+        )
+        conn.execute("UPDATE users SET order_count=order_count+1 WHERE tg_id=?", (data["user_tg_id"],))
+        conn.commit(); conn.close()
+        return oid
+    # PostgreSQL path
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            order_id = None
+            for _ in range(10):
+                oid = _short_order_id()
+                cur.execute("SELECT 1 FROM orders WHERE order_id=%s", (oid,))
+                if not cur.fetchone():
+                    order_id = oid
+                    break
+            if not order_id:
+                order_id = _short_order_id()
+            cur.execute(
+                """INSERT INTO orders
+                   (order_id, telegram_user_id, patient_name, patient_age, patient_gender,
+                    patient_type, service_id, child_timing, uses_diaper, complaints,
+                    delivery_slot, pickup_slot, district_id, latitude, longitude,
+                    price, extra_price, is_free)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (order_id, data["user_tg_id"], data["patient_name"], data["patient_age"],
+                 data["patient_gender"], data["patient_type"],
+                 data.get("service", "kal_tahlili"),
+                 data.get("child_timing", ""), bool(data.get("uses_diaper", 0)),
+                 json.dumps(data.get("complaints", []), ensure_ascii=False),
+                 data.get("delivery_slot", ""), data.get("pickup_slot"),
+                 data.get("region_id", "0"),
+                 data.get("latitude", 0.0), data.get("longitude", 0.0),
+                 data.get("price", 0), data.get("extra_price", 0),
+                 bool(data.get("is_free", 0)))
+            )
+            cur.execute(
+                "UPDATE telegram_users SET order_count=order_count+1 WHERE tg_id=%s",
+                (data["user_tg_id"],)
+            )
+        conn.commit()
+    finally:
+        conn.close()
     return order_id
 
 def insert_order_with_id(order_id: str, user_tg_id: int, price: int, extra_price: int, patient_name: str = ""):
-    """Insert a minimal order record using an already-generated ID (from the API/webapp)."""
-    conn = get_db()
-    exists = conn.execute("SELECT 1 FROM orders WHERE order_id=?", (order_id,)).fetchone()
-    if not exists:
-        conn.execute("""INSERT INTO orders
-            (order_id, user_tg_id, patient_name, patient_age, patient_gender, patient_type,
-             service, child_timing, uses_diaper, complaints, delivery_slot, pickup_slot,
-             latitude, longitude, region_id, price, extra_price, is_free)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
-            order_id, user_tg_id, patient_name, 0, "", "adult",
-            "kal_tahlili", "", 0, "[]", "", "", None, None, "",
-            price, extra_price, 0
-        ))
-        conn.commit()
-    conn.close()
+    """Mirror a webapp-created order so payment callbacks can find price/user info."""
+    if not _use_pg():
+        conn = _sqlite_get_db()
+        if not conn.execute("SELECT 1 FROM orders WHERE order_id=?", (order_id,)).fetchone():
+            conn.execute(
+                """INSERT INTO orders (order_id,user_tg_id,patient_name,patient_age,patient_gender,
+                   patient_type,service,child_timing,uses_diaper,complaints,delivery_slot,pickup_slot,
+                   latitude,longitude,region_id,price,extra_price,is_free)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (order_id, user_tg_id, patient_name, 0,"","adult","kal_tahlili","",0,"[]","","",None,None,"",price,extra_price,0)
+            )
+            conn.commit()
+        conn.close()
+        return
+    # PostgreSQL: the order already exists (created by API); just confirm it's there
+    # If somehow it doesn't exist (edge case), insert a stub
+    existing = _pg_exec("SELECT order_id FROM orders WHERE order_id=%s", (order_id,), fetch="one")
+    if not existing:
+        _pg_exec(
+            """INSERT INTO orders
+               (order_id, telegram_user_id, patient_name, patient_age, patient_gender,
+                patient_type, service_id, complaints, delivery_slot, district_id,
+                latitude, longitude, price, extra_price)
+               VALUES (%s,%s,%s,0,'unknown','adult','kal_tahlili','[]','not-selected','0',0.0,0.0,%s,%s)""",
+            (order_id, user_tg_id, patient_name, price, extra_price)
+        )
 
 def get_order(order_id):
-    conn = get_db()
-    row = conn.execute("SELECT * FROM orders WHERE order_id=?", (order_id,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    if not _use_pg():
+        conn = _sqlite_get_db()
+        row = conn.execute("SELECT * FROM orders WHERE order_id=?", (order_id,)).fetchone()
+        conn.close()
+        return dict(row) if row else None
+    row = _pg_exec("SELECT * FROM orders WHERE order_id=%s", (order_id,), fetch="one")
+    return _pg_row_to_order(dict(row)) if row else None
 
 def update_order(order_id, **kwargs):
-    conn = get_db()
-    for k, v in kwargs.items():
-        conn.execute(f"UPDATE orders SET {k}=? WHERE order_id=?", (v, order_id))
-    conn.commit()
-    conn.close()
+    if not _use_pg():
+        conn = _sqlite_get_db()
+        for k, v in kwargs.items():
+            conn.execute(f"UPDATE orders SET {k}=? WHERE order_id=?", (v, order_id))
+        conn.commit(); conn.close()
+        return
+    if not kwargs:
+        return
+    mapped = {_ORDER_TO_PG.get(k, k): v for k, v in kwargs.items()}
+    sets = ", ".join(f"{col}=%s" for col in mapped)
+    vals = list(mapped.values()) + [order_id]
+    _pg_exec(f"UPDATE orders SET {sets} WHERE order_id=%s", vals)
 
 def get_user_orders(tg_id):
-    conn = get_db()
-    rows = conn.execute("SELECT * FROM orders WHERE user_tg_id=? ORDER BY created_at DESC", (tg_id,)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    if not _use_pg():
+        conn = _sqlite_get_db()
+        rows = conn.execute("SELECT * FROM orders WHERE user_tg_id=? ORDER BY created_at DESC", (tg_id,)).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    rows = _pg_exec(
+        "SELECT * FROM orders WHERE telegram_user_id=%s ORDER BY created_at DESC",
+        (tg_id,), fetch="all"
+    ) or []
+    return [_pg_row_to_order(dict(r)) for r in rows]
 
 def find_nearest_courier(region_id):
     couriers = get_users_by_role("courier")
@@ -1982,7 +2127,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     print("Polling boshlandi...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
