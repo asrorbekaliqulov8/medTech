@@ -42,7 +42,7 @@ router.patch("/admin/orders/:orderId", requireRole("admin"), async (req, res) =>
   const orderId = String(req.params.orderId);
   const { status } = req.body as { status: string };
 
-  if (!["approved", "rejected", "completed"].includes(status)) {
+  if (!["approved", "rejected", "completed", "pending_admin"].includes(status)) {
     res.status(400).json({ error: "Invalid status" });
     return;
   }
@@ -50,7 +50,7 @@ router.patch("/admin/orders/:orderId", requireRole("admin"), async (req, res) =>
   const [order] = await db.select().from(ordersTable).where(eq(ordersTable.orderId, orderId));
   if (!order) { res.status(404).json({ error: "Order not found" }); return; }
 
-  if (status !== "completed" && order.status !== "pending_admin") {
+  if (["approved", "rejected"].includes(status) && !["pending_admin", "pending_payment", "approved"].includes(order.status)) {
     res.status(409).json({ error: "Order already processed", currentStatus: order.status });
     return;
   }

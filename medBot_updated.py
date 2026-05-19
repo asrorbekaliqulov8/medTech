@@ -22,6 +22,12 @@ import asyncio
 from datetime import date, datetime
 
 try:
+    import httpx as _httpx
+    _HTTPX_AVAILABLE = True
+except Exception:
+    _HTTPX_AVAILABLE = False
+
+try:
     from geopy.geocoders import Nominatim
     from geopy.extra.rate_limiter import RateLimiter
     _GEOPY_AVAILABLE = True
@@ -60,6 +66,24 @@ ADMIN_IDS = [6194484795, 8161075408]
 # falling back to the WEBAPP_URL env var, then a hardcoded default.
 _replit_domain = os.environ.get("REPLIT_DEV_DOMAIN") or os.environ.get("REPLIT_DOMAINS", "").split(",")[0].strip()
 WEBAPP_URL = os.environ.get("WEBAPP_URL") or (f"https://{_replit_domain}/" if _replit_domain else "https://lab-test-order--asroraliqulov.replit.app/")
+
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8080")
+
+async def update_pg_status(order_id: str, status: str) -> bool:
+    """Update order status in PostgreSQL through the local API server."""
+    if not ADMIN_IDS or not _HTTPX_AVAILABLE:
+        return False
+    url = f"{API_BASE_URL}/api/admin/orders/{order_id}"
+    try:
+        async with _httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.patch(
+                url,
+                params={"tg_id": ADMIN_IDS[0]},
+                json={"status": status},
+            )
+            return r.status_code == 200
+    except Exception:
+        return False
 
 # ─── TASHKENT DISTRICTS ───────────────────────────────────────────────────────
 REGIONS = [
@@ -1081,6 +1105,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # If a real Click webhook is configured, it will update the order automatically;
         # pressing this button is the manual fallback.
         update_order(order_id, status="approved", payment_method="click")
+        await update_pg_status(order_id, "approved")
         order = get_order(order_id)
         if order:
             await notify_staff_new_order(context, order_id, tg_id, lang)
@@ -1167,6 +1192,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         file_id = update.message.photo[-1].file_id
         update_order(order_id, receipt_file_id=file_id, status="pending_admin")
+        await update_pg_status(order_id, "pending_admin")
         await update.message.reply_text(t("receipt_received", lang), parse_mode="HTML")
         order = get_order(order_id)
         # Fallback to context if order not in local SQLite (created in PostgreSQL)
@@ -1741,6 +1767,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
     elif data.startswith("admin_approve_"):
         order_id = data[len("admin_approve_"):]
         update_order(order_id, status="approved")
+        await update_pg_status(order_id, "approved")
         order = get_order(order_id)
         if order:
             await notify_staff_new_order(context, order_id, order["user_tg_id"], "uz")
@@ -1756,6 +1783,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
     elif data.startswith("admin_reject_"):
         order_id = data[len("admin_reject_"):]
         update_order(order_id, status="rejected")
+        await update_pg_status(order_id, "rejected")
         order = get_order(order_id)
         if order:
             user_lang = (get_user(order["user_tg_id"]) or {}).get("lang", "uz")
@@ -1869,17 +1897,10 @@ async def handle_staff_callback(update: Update, context: ContextTypes.DEFAULT_TY
             )
 
 async def send_courier_panel(update: Update, context: ContextTypes.DEFAULT_TYPE, tg_id: int):
+    region_id = ""
     user = get_user(tg_id)
-    if not user or user.get("role") not in ("courier", "admin"):
-        msg = update.effective_message
-        if msg:
-            await msg.reply_text(
-                "🚫 Sizga kuryer paneli ruxsati berilmagan.\n"
-                "Admin bilan bog'laning.",
-                parse_mode="HTML"
-            )
-        return
-    region_id = user.get("region_id", "") or ""
+    if user:
+        region_id = user.get("region_id", "") or ""
     set_state(context, step="courier_panel")
     lang = lang_of_ctx(context, tg_id)
     webapp_url = f"{WEBAPP_URL}courier?tg_id={tg_id}&lang={lang}"
