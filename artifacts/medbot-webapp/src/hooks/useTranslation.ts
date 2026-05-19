@@ -42,7 +42,7 @@ const translations = {
     complaints: "Shikoyatlar",
     address: "Manzil",
     delivery: "Yetkazib berish",
-    pickupTimeTitle: "Olib ketish vaqti",
+    pickupTimeTitle: "Yetkazib berish vaqti",
   },
   ru: {
     serviceSelectionTitle: "Выберите услугу",
@@ -83,7 +83,7 @@ const translations = {
     complaints: "Жалобы",
     address: "Адрес",
     delivery: "Доставка",
-    pickupTimeTitle: "Время забора",
+    pickupTimeTitle: "Время доставки",
   },
   en: {
     serviceSelectionTitle: "Select a service",
@@ -124,7 +124,7 @@ const translations = {
     complaints: "Complaints",
     address: "Address",
     delivery: "Delivery",
-    pickupTimeTitle: "Pickup time",
+    pickupTimeTitle: "Delivery time",
   }
 };
 
