@@ -341,16 +341,16 @@ T = {
         ),
     },
     "click_pay_btn":   {"uz": "💳 Click orqali to'lash", "ru": "💳 Оплатить через Click", "en": "💳 Pay via Click"},
-    "click_check_btn": {"uz": "✅ Tekshirish",            "ru": "✅ Проверить",             "en": "✅ Check"},
+    "click_check_btn": {"uz": "✅ To'ladim",              "ru": "✅ Я оплатил",             "en": "✅ I paid"},
     "click_pending": {
         "uz": "⏳ To'lov hali tasdiqlanmagan. Iltimos, to'lov qiling va qayta tekshiring.",
         "ru": "⏳ Оплата ещё не подтверждена. Пожалуйста, оплатите и попробуйте снова.",
         "en": "⏳ Payment not yet confirmed. Please pay and try again.",
     },
     "click_confirmed": {
-        "uz": "✅ To'lov tasdiqlandi! Buyurtmangiz qabul qilindi. Kuryer siz bilan bog'lanadi.",
-        "ru": "✅ Оплата подтверждена! Заказ принят. Курьер свяжется с вами.",
-        "en": "✅ Payment confirmed! Order accepted. A courier will contact you.",
+        "uz": "✅ <b>Buyurtma qabul qilindi!</b>\n💳 To'lov muvaffaqiyatli amalga oshirildi.\n\n🚚 Kuryer yaqin orada siz bilan bog'lanadi.",
+        "ru": "✅ <b>Заказ принят!</b>\n💳 Оплата успешно выполнена.\n\n🚚 Курьер свяжется с вами в ближайшее время.",
+        "en": "✅ <b>Order accepted!</b>\n💳 Payment was successful.\n\n🚚 A courier will contact you shortly.",
     },
 
     "no_results": {
@@ -590,6 +590,23 @@ def create_order(data: dict):
     conn.commit()
     conn.close()
     return order_id
+
+def insert_order_with_id(order_id: str, user_tg_id: int, price: int, extra_price: int, patient_name: str = ""):
+    """Insert a minimal order record using an already-generated ID (from the API/webapp)."""
+    conn = get_db()
+    exists = conn.execute("SELECT 1 FROM orders WHERE order_id=?", (order_id,)).fetchone()
+    if not exists:
+        conn.execute("""INSERT INTO orders
+            (order_id, user_tg_id, patient_name, patient_age, patient_gender, patient_type,
+             service, child_timing, uses_diaper, complaints, delivery_slot, pickup_slot,
+             latitude, longitude, region_id, price, extra_price, is_free)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            order_id, user_tg_id, patient_name, 0, "", "adult",
+            "kal_tahlili", "", 0, "[]", "", "", None, None, "",
+            price, extra_price, 0
+        ))
+        conn.commit()
+    conn.close()
 
 def get_order(order_id):
     conn = get_db()
@@ -901,9 +918,10 @@ async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     order_id = order_data.get("orderId") or order_data.get("order_id")
-    price = order_data.get("price", 0)
-    extra = order_data.get("extraPrice", order_data.get("extra_price", 0))
-    total = (price or 0) + (extra or 0)
+    price = int(order_data.get("price", 0) or 0)
+    extra = int(order_data.get("extraPrice", order_data.get("extra_price", 0)) or 0)
+    patient_name = order_data.get("patientName", "")
+    total = price + extra
 
     if not order_id:
         # Fallback: create order locally if webapp didn't create it
@@ -933,13 +951,20 @@ async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE
             "is_free":       is_free,
         }
         order_id = create_order(local_data)
+    else:
+        # Order was created in PostgreSQL by the webapp — mirror it in local SQLite
+        # so that payment callbacks (get_order) can find price/user info.
+        if price == 0 and extra == 0:
+            price = int(get_setting("service_price") or 150000)
+        insert_order_with_id(order_id, tg_id, price, extra, patient_name)
 
     if not order_id:
         await update.message.reply_text("❌ Buyurtma yaratishda xatolik. Qaytadan urinib ko'ring.")
         return
 
-    # Store for payment tracking
-    set_state(context, step="waiting_payment", current_order_id=order_id, lang=lang)
+    # Store for payment tracking (also keep total in context as backup)
+    set_state(context, step="waiting_payment", current_order_id=order_id, lang=lang,
+              order_price=price, order_extra=extra, order_total=total)
 
     # Send payment method selection
     await update.message.reply_text(
@@ -1008,13 +1033,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         order_id = data[len("pay_admin_"):]
         await query.answer()
         order = get_order(order_id)
-        if not order:
-            await query.message.reply_text("❌ Buyurtma topilmadi.")
-            return
-        update_order(order_id, payment_method="admin_card")
+        state = get_state(context)
         card  = get_setting("payment_card")  or "8600 0000 0000 0000"
         owner = get_setting("payment_owner") or "Admin"
-        total = (order.get("price", 0) or 0) + (order.get("extra_price", 0) or 0)
+        if order:
+            total = (order.get("price", 0) or 0) + (order.get("extra_price", 0) or 0)
+        else:
+            total = state.get("order_total", int(get_setting("service_price") or 150000))
+        update_order(order_id, payment_method="admin_card") if order else None
         set_state(context, step="waiting_receipt", current_order_id=order_id)
         await query.message.reply_text(
             t("payment_instruction", lang, card=card, owner=owner, amount=f"{total:,}"),
@@ -1026,19 +1052,18 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         order_id = data[len("pay_click_"):]
         await query.answer()
         order = get_order(order_id)
-        if not order:
-            await query.message.reply_text("❌ Buyurtma topilmadi.")
-            return
-        update_order(order_id, payment_method="click")
+        state = get_state(context)
         click_url = get_setting("click_payment_url") or "https://my.click.uz"
-        total = (order.get("price", 0) or 0) + (order.get("extra_price", 0) or 0)
-        # Add order ID to URL as parameter
-        if "?" in click_url:
-            full_url = f"{click_url}&order_id={order_id}&amount={total}"
+        if order:
+            total = (order.get("price", 0) or 0) + (order.get("extra_price", 0) or 0)
+            update_order(order_id, payment_method="click")
         else:
-            full_url = f"{click_url}?order_id={order_id}&amount={total}"
+            total = state.get("order_total", int(get_setting("service_price") or 150000))
+        # Add order ID and amount to URL
+        sep = "&" if "?" in click_url else "?"
+        full_url = f"{click_url}{sep}order_id={order_id}&amount={total}"
 
-        set_state(context, step="click_payment", current_order_id=order_id, click_payment_attempts=0)
+        set_state(context, step="click_payment", current_order_id=order_id)
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton(t("click_pay_btn", lang), url=full_url)],
             [InlineKeyboardButton(t("click_check_btn", lang), callback_data=f"click_check_{order_id}")],
@@ -1052,22 +1077,20 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("click_check_"):
         order_id = data[len("click_check_"):]
         await query.answer()
-        state = get_state(context)
-        attempts = state.get("click_payment_attempts", 0) + 1
-        set_state(context, click_payment_attempts=attempts)
-
-        # Simulation: 1st tap → still pending; 2nd+ tap → confirmed
-        # In production: check Click API for real payment status
-        if attempts < 2:
-            await query.answer(t("click_pending", lang), show_alert=True)
-        else:
-            update_order(order_id, status="approved", payment_method="click")
-            order = get_order(order_id)
-            if order:
-                await notify_staff_new_order(context, order_id, tg_id, lang)
-            await query.message.reply_text(t("click_confirmed", lang), parse_mode="HTML")
-            reset_order_state(context)
-            await send_main_menu(update, context, lang)
+        # Confirm immediately on first tap ("To'ladim" button).
+        # If a real Click webhook is configured, it will update the order automatically;
+        # pressing this button is the manual fallback.
+        update_order(order_id, status="approved", payment_method="click")
+        order = get_order(order_id)
+        if order:
+            await notify_staff_new_order(context, order_id, tg_id, lang)
+        confirmed_text = t("click_confirmed", lang)
+        try:
+            await query.message.edit_text(confirmed_text, parse_mode="HTML", reply_markup=None)
+        except Exception:
+            await query.message.reply_text(confirmed_text, parse_mode="HTML")
+        reset_order_state(context)
+        await send_main_menu(update, context, lang)
         return
 
     # ── Feedback rating ────────────────────────────────────────────────────
@@ -1146,21 +1169,27 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update_order(order_id, receipt_file_id=file_id, status="pending_admin")
         await update.message.reply_text(t("receipt_received", lang), parse_mode="HTML")
         order = get_order(order_id)
-        user = get_user(tg_id)
+        # Fallback to context if order not in local SQLite (created in PostgreSQL)
+        if order:
+            total_amount = (order.get("price", 0) or 0) + (order.get("extra_price", 0) or 0)
+        else:
+            total_amount = state.get("order_total", int(get_setting("service_price") or 150000))
         for admin_id in ADMIN_IDS:
             try:
                 caption = (
                     f"💳 <b>Yangi to'lov keldi!</b>\n\n"
                     f"🔖 Buyurtma: <code>{order_id}</code>\n"
                     f"👤 Foydalanuvchi: <code>{tg_id}</code>\n"
-                    f"💰 Summa: <b>{((order['price'] or 0) + (order['extra_price'] or 0)):,} so'm</b>\n\n"
-                    f"⬇️ Web paneldan tasdiqlang yoki rad eting"
+                    f"💰 Summa: <b>{total_amount:,} so'm</b>\n\n"
+                    f"⬇️ Quyidagi tugmalar orqali tasdiqlang yoki rad eting"
                 )
                 admin_lang = lang_of_ctx(context, admin_id)
                 pending_url = f"{WEBAPP_URL}admin?tg_id={admin_id}&lang={admin_lang}&tab=pending"
-                notify_kb = InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🛠 Web paneldan tasdiqlash", web_app=WebAppInfo(url=pending_url)),
-                ]])
+                notify_kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"admin_approve_{order_id}"),
+                     InlineKeyboardButton("❌ Rad etish",  callback_data=f"admin_reject_{order_id}")],
+                    [InlineKeyboardButton("🛠 Web panelda ko'rish", web_app=WebAppInfo(url=pending_url))],
+                ])
                 await context.bot.send_photo(
                     admin_id, file_id, caption=caption,
                     reply_markup=notify_kb, parse_mode="HTML"
@@ -1264,16 +1293,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang  = lang_of_ctx(context, tg_id)
     step  = state.get("step", "")
 
-    if text in ("/start", "/menu"):
+    # Strip bot username suffix from commands (e.g. /courier@BotName → /courier)
+    cmd = text.split("@")[0].lower() if text.startswith("/") else text
+
+    if cmd in ("/start", "/menu"):
         await cmd_start(update, context)
         return
-    if text == "/admin" and tg_id in ADMIN_IDS:
+    if cmd == "/admin" and tg_id in ADMIN_IDS:
         await send_admin_panel(update, context, tg_id)
         return
-    if text == "/doctor":
+    if cmd == "/doctor":
         await send_doctor_panel(update, context, tg_id)
         return
-    if text == "/courier":
+    if cmd == "/courier":
         await send_courier_panel(update, context, tg_id)
         return
 
@@ -1798,35 +1830,79 @@ async def handle_staff_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await query.message.reply_text("📝 Buyurtma ID ni kiriting:\n📌 Masalan: <code>#A3F9</code>", parse_mode="HTML")
         set_state(context, step="doctor_waiting_order_id")
 
+    elif data == "courier_my_orders":
+        conn = get_db()
+        orders = conn.execute(
+            "SELECT * FROM orders WHERE assigned_courier_id=? AND status NOT IN ('completed','rejected') ORDER BY created_at DESC LIMIT 15",
+            (tg_id,)
+        ).fetchall()
+        conn.close()
+        if not orders:
+            await query.message.reply_text("📭 Sizga tayinlangan buyurtmalar yo'q.")
+        else:
+            for o in orders:
+                o = dict(o)
+                pickup = o.get("pickup_slot") or o.get("delivery_slot") or "—"
+                kb = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✅ Bajarildi", callback_data=f"courier_done_{o['order_id']}"),
+                ]])
+                await query.message.reply_text(
+                    f"📦 <b>{o['order_id']}</b>\n"
+                    f"👤 {o['patient_name']}\n"
+                    f"📍 {region_name(o.get('region_id', ''), 'uz')}\n"
+                    f"🚚 Pickup vaqti: {pickup}\n"
+                    f"🔖 Status: {o['status']}",
+                    reply_markup=kb, parse_mode="HTML"
+                )
+
     elif data.startswith("courier_order_"):
         order_id = data[len("courier_order_"):]
         order = get_order(order_id)
         if order:
+            pickup = order.get("pickup_slot") or order.get("delivery_slot") or "—"
             await query.message.reply_text(
                 f"📦 <b>{order_id}</b>\n"
                 f"👤 {order['patient_name']}\n"
                 f"📍 {region_name(order['region_id'], 'uz')}\n"
-                f"📦 Yetkazish: {order['delivery_slot']}\n"
-                f"🚚 Pickup: {order.get('pickup_slot', '—')}",
+                f"🚚 Pickup vaqti: {pickup}",
                 parse_mode="HTML"
             )
 
 async def send_courier_panel(update: Update, context: ContextTypes.DEFAULT_TYPE, tg_id: int):
     user = get_user(tg_id)
-    region_id = user.get("region_id", "") if user else ""
+    if not user or user.get("role") not in ("courier", "admin"):
+        msg = update.effective_message
+        if msg:
+            await msg.reply_text(
+                "🚫 Sizga kuryer paneli ruxsati berilmagan.\n"
+                "Admin bilan bog'laning.",
+                parse_mode="HTML"
+            )
+        return
+    region_id = user.get("region_id", "") or ""
     set_state(context, step="courier_panel")
     lang = lang_of_ctx(context, tg_id)
     webapp_url = f"{WEBAPP_URL}courier?tg_id={tg_id}&lang={lang}"
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🚗 Kuryer panelini ochish", web_app=WebAppInfo(url=webapp_url))],
+        [InlineKeyboardButton("📦 Mening buyurtmalarim", callback_data="courier_my_orders")],
     ])
-    await context.bot.send_message(
-        tg_id,
+    msg = update.effective_message
+    text = (
         f"🚗 <b>Kuryer paneli</b>\n"
         f"📍 Tumaningiz: <b>{region_name(region_id, 'uz') if region_id else 'Belgilanmagan'}</b>\n\n"
-        f"Barcha tayinlangan buyurtmalarni ko'rish va bajarish uchun panelni oching.",
-        reply_markup=kb, parse_mode="HTML"
+        f"Barcha tayinlangan buyurtmalarni ko'rish va bajarish uchun panelni oching."
     )
+    try:
+        if msg:
+            await msg.reply_text(text, reply_markup=kb, parse_mode="HTML")
+        else:
+            await context.bot.send_message(tg_id, text, reply_markup=kb, parse_mode="HTML")
+    except Exception as e:
+        try:
+            await context.bot.send_message(tg_id, text, reply_markup=kb, parse_mode="HTML")
+        except Exception:
+            pass
 
 # ─── BROADCAST ────────────────────────────────────────────────────────────────
 async def broadcast_to_all(context: ContextTypes.DEFAULT_TYPE, text: str):

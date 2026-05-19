@@ -1,6 +1,5 @@
 import { useOrderStore } from '../../store/useOrderStore';
 import { useTranslation } from '../../hooks/useTranslation';
-import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
 interface Props {
@@ -9,51 +8,40 @@ interface Props {
 
 export function Step6Delivery({ onNext }: Props) {
   const { t } = useTranslation();
-  const { updateField, patientType, childTiming, deliverySlot, pickupSlot } = useOrderStore();
+  const { updateField, patientType, childTiming, pickupSlot } = useOrderStore();
 
-  const handleSelect = (slot: string, isPickup: boolean = false) => {
-    if (isPickup) {
-      updateField('pickupSlot', slot);
-      updateField('deliverySlot', 'advance');
-    } else {
-      updateField('deliverySlot', slot);
-      updateField('pickupSlot', null);
-    }
+  const handleSelect = (slot: string) => {
+    updateField('pickupSlot', slot);
+    updateField('deliverySlot', null);
     onNext();
   };
 
-  let title = '';
-  let options: { id: string; label: string; isPickup: boolean }[] = [];
+  let title = `🚚 ${t('pickupTimeTitle')}`;
+  let options: { id: string; label: string }[] = [];
 
   if (patientType === 'adult') {
-    title = `📦 ${t('deliveryTimeAdult')}`;
     options = [
-      { id: '18:00-20:00', label: '18:00–20:00', isPickup: false },
-      { id: '20:00-22:00', label: '20:00–22:00', isPickup: false },
+      { id: '18:00-20:00', label: '18:00–20:00' },
+      { id: '20:00-22:00', label: '20:00–22:00' },
     ];
   } else {
-    // Child
     if (childTiming === 'irregular') {
-      title = `📦 ${t('containerAdvance')}`;
       options = [
-        { id: 'pickup_call', label: `🚚 ${t('pickupCall')}`, isPickup: true },
+        { id: 'pickup_call', label: `📞 ${t('pickupCall')}` },
       ];
     } else if (childTiming === 'morning') {
-      title = `🚚 Pickup time`;
       options = [
-        { id: '07:00-10:00', label: '07:00–10:00', isPickup: true },
+        { id: '07:00-10:00', label: '07:00–10:00' },
       ];
     } else if (childTiming === 'day') {
-      title = `🚚 Pickup time`;
       options = [
-        { id: '12:00-15:00', label: '12:00–15:00', isPickup: true },
-        { id: '15:00-18:00', label: '15:00–18:00', isPickup: true },
+        { id: '12:00-15:00', label: '12:00–15:00' },
+        { id: '15:00-18:00', label: '15:00–18:00' },
       ];
     } else if (childTiming === 'evening') {
-      title = `🚚 Pickup time`;
       options = [
-        { id: '15:00-18:00', label: '15:00–18:00', isPickup: true },
-        { id: '18:00-20:00', label: '18:00–20:00', isPickup: true },
+        { id: '15:00-18:00', label: '15:00–18:00' },
+        { id: '18:00-20:00', label: '18:00–20:00' },
       ];
     }
   }
@@ -61,18 +49,18 @@ export function Step6Delivery({ onNext }: Props) {
   return (
     <div className="space-y-6">
       <h2 className="text-xl font-semibold text-center mb-6 text-foreground">{title}</h2>
-      
+
       <div className="grid gap-3">
         {options.map((opt) => {
-          const isSelected = opt.isPickup ? pickupSlot === opt.id : deliverySlot === opt.id;
-          
+          const isSelected = pickupSlot === opt.id;
+
           return (
-            <Card 
+            <Card
               key={opt.id}
               className={`p-5 cursor-pointer transition-all active:scale-[0.98] flex items-center justify-between ${
                 isSelected ? 'border-primary bg-primary/5 shadow-sm' : 'hover:border-primary/50'
               }`}
-              onClick={() => handleSelect(opt.id, opt.isPickup)}
+              onClick={() => handleSelect(opt.id)}
             >
               <span className="font-medium text-lg">{opt.label}</span>
               <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${

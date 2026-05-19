@@ -76,7 +76,12 @@ export function Step8Confirmation({ onConfirm, onCancel }: Props) {
             // @ts-ignore
             if (window.Telegram?.WebApp?.sendData) {
               // @ts-ignore
-              window.Telegram.WebApp.sendData(JSON.stringify({ orderId: data.orderId }));
+              window.Telegram.WebApp.sendData(JSON.stringify({
+                orderId: data.orderId,
+                price: basePrice,
+                extraPrice: extraFee,
+                patientName: orderState.patientName,
+              }));
             }
           } catch (_) {}
           onConfirm();
@@ -104,8 +109,8 @@ export function Step8Confirmation({ onConfirm, onCancel }: Props) {
         />
         <Separator />
         <Row
-          label={t('delivery')}
-          value={orderState.pickupSlot ? `Pickup: ${orderState.pickupSlot}` : orderState.deliverySlot ?? '—'}
+          label={t('pickupTimeTitle')}
+          value={orderState.pickupSlot ?? '—'}
         />
         <Separator />
         <Row label={t('address')} value={[districtName, orderState.addressNote].filter(Boolean).join(' – ')} />
