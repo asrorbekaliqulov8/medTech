@@ -92,7 +92,7 @@ if [[ "$UPDATE_ONLY" == false ]]; then
   apt-get install -y -qq \
     curl git build-essential ca-certificates gnupg \
     nginx certbot python3-certbot-nginx \
-    python3 python3-pip python3-venv \
+    python3 python3-pip python3-venv python3-full \
     postgresql postgresql-contrib \
     ufw
   ok "Tizim paketlari o'rnatildi"
@@ -197,10 +197,19 @@ sed -i "s|WEBAPP_URL = .*|WEBAPP_URL = \"${WEBAPP_URL}\"|" \
 ok ".env fayllar yozildi"
 
 # ═════════════════════════════════════════════
-#  5. PYTHON KUTUBXONALAR
+#  5. PYTHON VIRTUAL ENVIRONMENT + KUTUBXONALAR
 # ═════════════════════════════════════════════
-log "Python kutubxonalarini o'rnatish..."
-pip3 install -q -r "${APP_DIR}/requirements.txt"
+VENV_DIR="${APP_DIR}/venv"
+log "Python virtual environment sozlanmoqda..."
+if [[ ! -d "$VENV_DIR" ]]; then
+  python3 -m venv "$VENV_DIR"
+  ok "venv yaratildi: ${VENV_DIR}"
+else
+  ok "venv mavjud: ${VENV_DIR}"
+fi
+log "Python kutubxonalarini o'rnatish (venv ichida)..."
+"${VENV_DIR}/bin/pip" install -q --upgrade pip
+"${VENV_DIR}/bin/pip" install -q -r "${APP_DIR}/requirements.txt"
 ok "Python: python-telegram-bot va boshqalar o'rnatildi"
 
 # ═════════════════════════════════════════════
@@ -281,7 +290,7 @@ User=root
 WorkingDirectory=${APP_DIR}
 Environment="TELEGRAM_BOT_TOKEN=${BOT_TOKEN}"
 Environment="DATABASE_URL=${DATABASE_URL}"
-ExecStart=$(command -v python3) ${APP_DIR}/medBot_updated.py
+ExecStart=${APP_DIR}/venv/bin/python ${APP_DIR}/medBot_updated.py
 Restart=always
 RestartSec=5
 StandardOutput=journal
