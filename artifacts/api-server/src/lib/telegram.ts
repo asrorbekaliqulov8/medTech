@@ -12,6 +12,46 @@ export async function tgSendMessage(chatId: number, text: string): Promise<void>
   } catch (_) {}
 }
 
+export interface TgInlineButton {
+  text: string;
+  callback_data?: string;
+  url?: string;
+}
+
+export async function tgSendMessageWithKeyboard(
+  chatId: number,
+  text: string,
+  keyboard: TgInlineButton[][],
+): Promise<void> {
+  if (!BOT_TOKEN) return;
+  try {
+    await fetch(`${TG_API}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: keyboard },
+      }),
+    });
+  } catch (_) {}
+}
+
+export async function tgGetFileUrl(fileId: string): Promise<string | null> {
+  if (!BOT_TOKEN) return null;
+  try {
+    const res = await fetch(`${TG_API}/getFile?file_id=${fileId}`);
+    const data = await res.json() as { ok: boolean; result?: { file_path?: string } };
+    if (data.ok && data.result?.file_path) {
+      return `https://api.telegram.org/file/bot${BOT_TOKEN}/${data.result.file_path}`;
+    }
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
 export async function tgSendDocument(
   chatId: number,
   fileBuffer: Buffer,

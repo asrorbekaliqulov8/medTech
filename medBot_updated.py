@@ -16,7 +16,6 @@ import json
 import math
 import os
 import random
-import sqlite3
 import string
 import asyncio
 from datetime import date, datetime
@@ -449,33 +448,23 @@ COMPLAINT_KEYS = [
     "complaint_weight_loss",  "complaint_blood",    "complaint_parasite", "complaint_allergy"
 ]
 
-# ─── DATABASE (PostgreSQL) ────────────────────────────────────────────────────
-try:
-    import psycopg2
-    import psycopg2.extras
-    _PG_AVAILABLE = True
-except Exception:
-    _PG_AVAILABLE = False
+# ─── DATABASE (PostgreSQL only) ───────────────────────────────────────────────
+import psycopg2
+import psycopg2.extras
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
-
-# SQLite fallback path (used only when DATABASE_URL is absent)
-DB_PATH = "medbot.db"
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is not set. Bot requires PostgreSQL.")
 
 # Column name mapping: bot dict keys ↔ PostgreSQL column names
 _ORDER_TO_PG = {
-    "user_tg_id":        "telegram_user_id",
-    "region_id":         "district_id",
-    "service":           "service_id",
+    "user_tg_id":          "telegram_user_id",
+    "region_id":           "district_id",
+    "service":             "service_id",
     "assigned_courier_id": "courier_tg_id",
     "assigned_doctor_id":  "doctor_tg_id",
 }
 _PG_TO_ORDER = {v: k for k, v in _ORDER_TO_PG.items()}
-
-def _use_pg() -> bool:
-    return _PG_AVAILABLE and bool(DATABASE_URL)
-
-# ── low-level helpers ─────────────────────────────────────────────────────────
 
 def _pg_exec(sql: str, params=None, *, fetch: str = "none"):
     """Execute SQL on PostgreSQL and return rows (or None)."""
@@ -494,56 +483,7 @@ def _pg_exec(sql: str, params=None, *, fetch: str = "none"):
     finally:
         conn.close()
 
-def _sqlite_get_db():
-    import sqlite3 as _sqlite3
-    conn = _sqlite3.connect(DB_PATH)
-    conn.row_factory = _sqlite3.Row
-    return conn
-
-def _sqlite_init():
-    import sqlite3 as _sqlite3
-    conn = _sqlite_get_db()
-    c = conn.cursor()
-    c.execute("""CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY, tg_id INTEGER UNIQUE, lang TEXT DEFAULT 'uz',
-        patient_id TEXT UNIQUE, full_name TEXT, order_count INTEGER DEFAULT 0,
-        bonus_points INTEGER DEFAULT 0, role TEXT DEFAULT 'user',
-        region_id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT UNIQUE,
-        user_tg_id INTEGER, patient_name TEXT, patient_age INTEGER,
-        patient_gender TEXT, patient_type TEXT, service TEXT,
-        child_timing TEXT, uses_diaper INTEGER, complaints TEXT,
-        delivery_slot TEXT, pickup_slot TEXT, latitude REAL, longitude REAL,
-        region_id TEXT, price INTEGER DEFAULT 0, extra_price INTEGER DEFAULT 0,
-        is_free INTEGER DEFAULT 0, status TEXT DEFAULT 'pending_payment',
-        payment_method TEXT DEFAULT 'pending', assigned_courier_id INTEGER,
-        assigned_doctor_id INTEGER, receipt_file_id TEXT, result_file_id TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS feedback (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, user_tg_id INTEGER,
-        rating INTEGER, problem_type TEXT, comment TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
-    defaults = {
-        "mandatory_sub": "1", "channel_id": CHANNEL_ID,
-        "service_price": "150000", "pickup_extra": "30000",
-        "payment_card": "8600 1234 5678 9012",
-        "payment_owner": "N-MedHomeLab Admin",
-        "instruction_file_id": "", "admin_contact": "@admin_username",
-        "allowed_region_ids": "4,11,13,15",
-        "click_payment_url": "https://my.click.uz/services/pay?service_id=12345&merchant_id=54321",
-    }
-    for k, v in defaults.items():
-        c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
-    conn.commit()
-    conn.close()
-
 def init_db():
-    if not _use_pg():
-        _sqlite_init()
-        return
-    # Seed default settings in PostgreSQL if not already present
     defaults = {
         "mandatory_sub": "1", "channel_id": CHANNEL_ID,
         "service_price": "150000", "pickup_extra": "30000",
@@ -562,20 +502,10 @@ def init_db():
 # ── settings ──────────────────────────────────────────────────────────────────
 
 def get_setting(key):
-    if not _use_pg():
-        conn = _sqlite_get_db()
-        row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
-        conn.close()
-        return row["value"] if row else None
     row = _pg_exec("SELECT value FROM settings WHERE key=%s", (key,), fetch="one")
     return row["value"] if row else None
 
 def set_setting(key, value):
-    if not _use_pg():
-        conn = _sqlite_get_db()
-        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
-        conn.commit(); conn.close()
-        return
     _pg_exec(
         "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
         (key, str(value))
@@ -588,21 +518,10 @@ def get_allowed_region_ids():
 # ── telegram users ────────────────────────────────────────────────────────────
 
 def get_user(tg_id):
-    if not _use_pg():
-        conn = _sqlite_get_db()
-        row = conn.execute("SELECT * FROM users WHERE tg_id=?", (tg_id,)).fetchone()
-        conn.close()
-        return dict(row) if row else None
     row = _pg_exec("SELECT * FROM telegram_users WHERE tg_id=%s", (tg_id,), fetch="one")
     return dict(row) if row else None
 
 def create_user(tg_id, lang="uz"):
-    if not _use_pg():
-        conn = _sqlite_get_db()
-        pid = f"MED{tg_id % 1000000:06d}"
-        conn.execute("INSERT OR IGNORE INTO users (tg_id, lang, patient_id) VALUES (?, ?, ?)", (tg_id, lang, pid))
-        conn.commit(); conn.close()
-        return
     pid = f"MED{tg_id % 1000000:06d}"
     _pg_exec(
         "INSERT INTO telegram_users (tg_id, lang, patient_id) VALUES (%s, %s, %s) ON CONFLICT (tg_id) DO NOTHING",
@@ -610,22 +529,14 @@ def create_user(tg_id, lang="uz"):
     )
 
 def update_user(tg_id, **kwargs):
-    if not _use_pg():
-        conn = _sqlite_get_db()
-        for k, v in kwargs.items():
-            conn.execute(f"UPDATE users SET {k}=? WHERE tg_id=?", (v, tg_id))
-        conn.commit(); conn.close()
-        return
     role = kwargs.pop("role", None)
     region_id = kwargs.get("region_id", None)
-    # Update telegram_users fields
     if kwargs:
         sets = ", ".join(f"{k}=%s" for k in kwargs)
         vals = list(kwargs.values()) + [tg_id]
         _pg_exec(f"UPDATE telegram_users SET {sets} WHERE tg_id=%s", vals)
     if role is not None:
         _pg_exec("UPDATE telegram_users SET role=%s WHERE tg_id=%s", (role, tg_id))
-        # Sync courier/doctor role to staff_users
         if role in ("courier", "doctor"):
             _pg_exec(
                 """INSERT INTO staff_users (tg_id, role, region_id, lang)
@@ -635,21 +546,11 @@ def update_user(tg_id, **kwargs):
             )
 
 def get_all_users():
-    if not _use_pg():
-        conn = _sqlite_get_db()
-        rows = conn.execute("SELECT * FROM users").fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
     rows = _pg_exec("SELECT * FROM telegram_users", fetch="all") or []
     return [dict(r) for r in rows]
 
 def get_users_by_role(role):
     """Returns staff (couriers/doctors) from staff_users table."""
-    if not _use_pg():
-        conn = _sqlite_get_db()
-        rows = conn.execute("SELECT * FROM users WHERE role=?", (role,)).fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
     rows = _pg_exec("SELECT tg_id, region_id, lang FROM staff_users WHERE role=%s", (role,), fetch="all") or []
     return [dict(r) for r in rows]
 
@@ -671,29 +572,6 @@ def _pg_row_to_order(row: dict) -> dict:
     return result
 
 def create_order(data: dict):
-    if not _use_pg():
-        conn = _sqlite_get_db()
-        for _ in range(10):
-            oid = _short_order_id()
-            if not conn.execute("SELECT 1 FROM orders WHERE order_id=?", (oid,)).fetchone():
-                break
-        conn.execute(
-            """INSERT INTO orders (order_id,user_tg_id,patient_name,patient_age,patient_gender,
-               patient_type,service,child_timing,uses_diaper,complaints,delivery_slot,pickup_slot,
-               latitude,longitude,region_id,price,extra_price,is_free)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (oid, data["user_tg_id"], data["patient_name"], data["patient_age"],
-             data["patient_gender"], data["patient_type"], data["service"],
-             data.get("child_timing",""), data.get("uses_diaper",0),
-             json.dumps(data.get("complaints",[]), ensure_ascii=False),
-             data.get("delivery_slot",""), data.get("pickup_slot",""),
-             data.get("latitude"), data.get("longitude"), data.get("region_id",""),
-             data.get("price",0), data.get("extra_price",0), data.get("is_free",0))
-        )
-        conn.execute("UPDATE users SET order_count=order_count+1 WHERE tg_id=?", (data["user_tg_id"],))
-        conn.commit(); conn.close()
-        return oid
-    # PostgreSQL path
     conn = psycopg2.connect(DATABASE_URL)
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -735,21 +613,6 @@ def create_order(data: dict):
 
 def insert_order_with_id(order_id: str, user_tg_id: int, price: int, extra_price: int, patient_name: str = ""):
     """Mirror a webapp-created order so payment callbacks can find price/user info."""
-    if not _use_pg():
-        conn = _sqlite_get_db()
-        if not conn.execute("SELECT 1 FROM orders WHERE order_id=?", (order_id,)).fetchone():
-            conn.execute(
-                """INSERT INTO orders (order_id,user_tg_id,patient_name,patient_age,patient_gender,
-                   patient_type,service,child_timing,uses_diaper,complaints,delivery_slot,pickup_slot,
-                   latitude,longitude,region_id,price,extra_price,is_free)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (order_id, user_tg_id, patient_name, 0,"","adult","kal_tahlili","",0,"[]","","",None,None,"",price,extra_price,0)
-            )
-            conn.commit()
-        conn.close()
-        return
-    # PostgreSQL: the order already exists (created by API); just confirm it's there
-    # If somehow it doesn't exist (edge case), insert a stub
     existing = _pg_exec("SELECT order_id FROM orders WHERE order_id=%s", (order_id,), fetch="one")
     if not existing:
         _pg_exec(
@@ -762,21 +625,10 @@ def insert_order_with_id(order_id: str, user_tg_id: int, price: int, extra_price
         )
 
 def get_order(order_id):
-    if not _use_pg():
-        conn = _sqlite_get_db()
-        row = conn.execute("SELECT * FROM orders WHERE order_id=?", (order_id,)).fetchone()
-        conn.close()
-        return dict(row) if row else None
     row = _pg_exec("SELECT * FROM orders WHERE order_id=%s", (order_id,), fetch="one")
     return _pg_row_to_order(dict(row)) if row else None
 
 def update_order(order_id, **kwargs):
-    if not _use_pg():
-        conn = _sqlite_get_db()
-        for k, v in kwargs.items():
-            conn.execute(f"UPDATE orders SET {k}=? WHERE order_id=?", (v, order_id))
-        conn.commit(); conn.close()
-        return
     if not kwargs:
         return
     mapped = {_ORDER_TO_PG.get(k, k): v for k, v in kwargs.items()}
@@ -785,11 +637,6 @@ def update_order(order_id, **kwargs):
     _pg_exec(f"UPDATE orders SET {sets} WHERE order_id=%s", vals)
 
 def get_user_orders(tg_id):
-    if not _use_pg():
-        conn = _sqlite_get_db()
-        rows = conn.execute("SELECT * FROM orders WHERE user_tg_id=? ORDER BY created_at DESC", (tg_id,)).fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
     rows = _pg_exec(
         "SELECT * FROM orders WHERE telegram_user_id=%s ORDER BY created_at DESC",
         (tg_id,), fetch="all"
@@ -1352,14 +1199,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"🔖 Buyurtma: <code>{order_id}</code>\n"
                     f"👤 Foydalanuvchi: <code>{tg_id}</code>\n"
                     f"💰 Summa: <b>{total_amount:,} so'm</b>\n\n"
-                    f"⬇️ Quyidagi tugmalar orqali tasdiqlang yoki rad eting"
+                    f"⬇️ Web admin paneldan tasdiqlang yoki rad eting"
                 )
                 admin_lang = lang_of_ctx(context, admin_id)
                 pending_url = f"{WEBAPP_URL}admin?tg_id={admin_id}&lang={admin_lang}&tab=pending"
                 notify_kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"admin_approve_{order_id}"),
-                     InlineKeyboardButton("❌ Rad etish",  callback_data=f"admin_reject_{order_id}")],
-                    [InlineKeyboardButton("🛠 Web panelda ko'rish", web_app=WebAppInfo(url=pending_url))],
+                    [InlineKeyboardButton("🛠 Web panelda tasdiqlash", web_app=WebAppInfo(url=pending_url))],
                 ])
                 await context.bot.send_photo(
                     admin_id, file_id, caption=caption,
@@ -1903,9 +1748,10 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
             )
             kb = None
             if o["status"] == "pending_admin":
+                admin_lang_local = lang_of_ctx(context, tg_id)
+                pending_url = f"{WEBAPP_URL}admin?tg_id={tg_id}&lang={admin_lang_local}&tab=pending"
                 kb = InlineKeyboardMarkup([[
-                    InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"admin_approve_{o['order_id']}"),
-                    InlineKeyboardButton("❌ Rad etish",  callback_data=f"admin_reject_{o['order_id']}"),
+                    InlineKeyboardButton("🛠 Web panelda tasdiqlash", web_app=WebAppInfo(url=pending_url)),
                 ]])
             await query.message.reply_text(text, reply_markup=kb, parse_mode="HTML")
 

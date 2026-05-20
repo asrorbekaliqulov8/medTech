@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, ordersTable, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { CreateOrderBody } from "@workspace/api-zod";
+import { tgSendMessageWithKeyboard } from "../lib/telegram";
 
 const router = Router();
 
@@ -21,6 +22,29 @@ async function getSetting(key: string, fallback: string): Promise<string> {
   } catch {
     return fallback;
   }
+}
+
+const PAYMENT_MSG: Record<string, string> = {
+  uz: "✅ <b>Buyurtmangiz qabul qilindi!</b>\n\n🔖 Buyurtma: <code>{order_id}</code>\n💰 Jami summa: <b>{amount} so'm</b>\n\n💳 To'lov usulini tanlang:",
+  ru: "✅ <b>Ваш заказ принят!</b>\n\n🔖 Заказ: <code>{order_id}</code>\n💰 Сумма: <b>{amount} сум</b>\n\nВыберите способ оплаты:",
+  en: "✅ <b>Your order has been received!</b>\n\n🔖 Order: <code>{order_id}</code>\n💰 Amount: <b>{amount} sum</b>\n\nChoose payment method:",
+};
+
+const PAY_ADMIN_BTN: Record<string, string> = { uz: "🏦 Admin orqali", ru: "🏦 Через администратора", en: "🏦 Via admin" };
+const PAY_CLICK_BTN: Record<string, string> = { uz: "💳 Click orqali", ru: "💳 Через Click", en: "💳 Via Click" };
+
+async function sendPaymentMessage(telegramUserId: number, lang: string, orderId: string, amount: number): Promise<void> {
+  const l = (["uz", "ru", "en"] as const).includes(lang as "uz") ? lang as "uz" | "ru" | "en" : "uz";
+  const text = (PAYMENT_MSG[l] ?? PAYMENT_MSG.uz)
+    .replace("{order_id}", orderId)
+    .replace("{amount}", amount.toLocaleString("uz-UZ"));
+  const keyboard = [
+    [
+      { text: PAY_ADMIN_BTN[l] ?? PAY_ADMIN_BTN.uz, callback_data: `pay_admin_${orderId}` },
+      { text: PAY_CLICK_BTN[l] ?? PAY_CLICK_BTN.uz, callback_data: `pay_click_${orderId}` },
+    ],
+  ];
+  await tgSendMessageWithKeyboard(telegramUserId, text, keyboard);
 }
 
 router.post("/orders", async (req, res) => {
@@ -76,6 +100,9 @@ router.post("/orders", async (req, res) => {
     isFree: false,
     status: "pending_payment",
   }).returning();
+
+  // Send Telegram payment message (fire-and-forget)
+  sendPaymentMessage(inserted.telegramUserId, inserted.lang ?? "uz", inserted.orderId, inserted.price + inserted.extraPrice).catch(() => {});
 
   res.status(201).json({
     id: inserted.id,

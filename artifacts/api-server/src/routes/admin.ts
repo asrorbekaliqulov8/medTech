@@ -4,7 +4,7 @@ import { ordersTable, settingsTable } from "@workspace/db/schema";
 import { staffUsersTable } from "@workspace/db/schema";
 import { eq, desc, sql, and } from "drizzle-orm";
 import { requireRole, ADMIN_IDS } from "../middleware/requireRole";
-import { tgSendMessage } from "../lib/telegram";
+import { tgSendMessage, tgGetFileUrl } from "../lib/telegram";
 
 const router = Router();
 
@@ -132,6 +132,13 @@ router.delete("/admin/staff/:staffTgId", requireRole("admin"), async (req, res) 
 router.get("/admin/users", requireRole("admin"), async (_req, res) => {
   const rows = await db.selectDistinct({ tgId: ordersTable.telegramUserId }).from(ordersTable).orderBy(ordersTable.telegramUserId);
   res.json(rows.map(r => ({ tgId: r.tgId })));
+});
+
+router.get("/admin/tg-file/:fileId", requireRole("admin"), async (req, res) => {
+  const { fileId } = req.params;
+  const url = await tgGetFileUrl(fileId);
+  if (!url) { res.status(404).json({ error: "File not found" }); return; }
+  res.redirect(url);
 });
 
 router.post("/admin/broadcast", requireRole("admin"), async (req, res) => {

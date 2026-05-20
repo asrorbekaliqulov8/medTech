@@ -247,6 +247,7 @@ function OrdersTab({ tgId, lang, t, initialFilter = 'all' }: { tgId: number; lan
 
   const filters = [
     { key: 'all', label: t.all },
+    { key: 'pending_payment', label: t.pendingPay },
     { key: 'pending_admin', label: t.pendingAdmin },
     { key: 'approved', label: t.approved },
     { key: 'completed', label: t.completed },
@@ -306,6 +307,21 @@ function OrdersTab({ tgId, lang, t, initialFilter = 'all' }: { tgId: number; lan
                 <span className="font-medium text-slate-700">{(order.price + order.extraPrice).toLocaleString()} {t.currency}</span>
               </div>
               <div className="text-xs text-slate-400">{new Date(order.createdAt).toLocaleString('uz-UZ')}</div>
+              {order.payment_method && (
+                <div className="text-xs text-slate-500">
+                  💳 {order.payment_method === 'admin_card' ? (lang === 'ru' ? 'Через администратора' : lang === 'en' ? 'Via admin' : 'Admin orqali') : 'Click'}
+                </div>
+              )}
+              {order.receipt_file_id && (
+                <a
+                  href={`/api/admin/tg-file/${order.receipt_file_id}?tg_id=${tgId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs text-indigo-600 underline"
+                >
+                  🧾 {lang === 'ru' ? 'Чек (скриншот)' : lang === 'en' ? 'Receipt (screenshot)' : 'Chek (screenshot)'}
+                </a>
+              )}
               {order.status === 'pending_admin' && (
                 <div className="grid grid-cols-2 gap-2 pt-1">
                   <Button size="sm" className="bg-green-500 hover:bg-green-600 h-9 rounded-lg"
